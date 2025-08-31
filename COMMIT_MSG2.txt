@@ -1,0 +1,4 @@
+refactor(core): register text plugin, safer range mapping, async config reload
+
+feat(api): auto-fix fallback and await rule updates
+chore: add .editorconfig/.gitattributes and remove unused sample

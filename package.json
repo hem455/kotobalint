@@ -8,7 +8,9 @@
     "sample": "node core/run-sample.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test": "node --test"
+    "test": "node --test",
+    "api": "npm run build && node dist/api/server.js",
+    "dev": "npm run build && node dist/api/server.js"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
@@ -20,6 +22,10 @@
     "typescript": "^5.5.4"
   },
   "dependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
     "textlint": "^14.0.0",
     "textlint-plugin-text": "^3.0.6",
     "textlint-rule-preset-ja-technical-writing": "^8.0.0"
