@@ -1,0 +1,27 @@
+{
+  "name": "kotobalint",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "sample": "node core/run-sample.mjs",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.0",
+    "prettier": "^3.3.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "textlint": "^14.0.0",
+    "textlint-plugin-text": "^3.0.6",
+    "textlint-rule-preset-ja-technical-writing": "^8.0.0"
+  }
+}

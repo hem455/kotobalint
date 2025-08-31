@@ -1,5 +1,10 @@
 # 実装タスク: 日本語文書校正支援（document-proofreading）
 
+## 進捗（ステータス）
+- フェーズ0: 基盤用意 — 完了（リポジトリ初期化、Node/TS設定、textlintサンプル実行検証済み）
+  - サンプル実行コマンド: `npm run sample`（3件の指摘を出力）
+  - テスト実行コマンド: `npm test`（node:test のスモークテスト）
+
 ## フェーズ0: 基盤用意
 - リポジトリ初期化とディレクトリ構成定義（`core/`, `api/`, `web/`, `configs/`）
 - Node.js プロジェクト初期化（TypeScript, lint, format, test）
