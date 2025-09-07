@@ -1,12 +1,75 @@
-import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import type { Metadata, Viewport } from 'next'
+import { Inter, Noto_Sans_JP } from 'next/font/google'
 import './globals.css'
 
-const inter = Inter({ subsets: ['latin'] })
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
+  display: 'swap',
+})
+
+const notoSansJP = Noto_Sans_JP({
+  subsets: ['latin'],
+  variable: '--font-noto-sans-jp',
+  weight: ['300', '400', '500', '700'],
+  display: 'swap',
+})
 
 export const metadata: Metadata = {
-  title: 'Japanese Proofreading App',
-  description: 'AI-powered Japanese text proofreading and correction tool',
+  title: {
+    default: 'Japanese Proofreading App',
+    template: '%s | Japanese Proofreading App'
+  },
+  description: 'AI-powered Japanese text proofreading and correction tool. Detect and fix grammar, style, and consistency issues in Japanese documents.',
+  keywords: ['Japanese', 'proofreading', 'correction', 'grammar', 'style', 'AI', 'text analysis'],
+  authors: [{ name: 'Japanese Proofreading Team' }],
+  creator: 'Japanese Proofreading App',
+  publisher: 'Japanese Proofreading App',
+  formatDetection: {
+    email: false,
+    address: false,
+    telephone: false,
+  },
+  metadataBase: new URL('https://japanese-proofreading.app'),
+  alternates: {
+    canonical: '/',
+  },
+  openGraph: {
+    type: 'website',
+    locale: 'ja_JP',
+    url: 'https://japanese-proofreading.app',
+    title: 'Japanese Proofreading App',
+    description: 'AI-powered Japanese text proofreading and correction tool',
+    siteName: 'Japanese Proofreading App',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Japanese Proofreading App',
+    description: 'AI-powered Japanese text proofreading and correction tool',
+    creator: '@japanese_proofreading',
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  userScalable: true,
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)', color: '#0f172a' },
+  ],
 }
 
 export default function RootLayout({
@@ -15,14 +78,29 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="ja">
-      <body className={inter.className}>
-        {children}
+    <html lang="ja" className={`${inter.variable} ${notoSansJP.variable}`}>
+      <head>
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <link rel="manifest" href="/manifest.json" />
+      </head>
+      <body className="font-sans bg-gray-50 text-gray-900 antialiased">
+        <div id="root">
+          {children}
+        </div>
+
+        {/* Skip to main content for accessibility */}
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 bg-primary-600 text-white px-4 py-2 rounded-lg z-50 focus-ring"
+        >
+          メインコンテンツにスキップ
+        </a>
       </body>
     </html>
   )
 }
-
 
 
 
