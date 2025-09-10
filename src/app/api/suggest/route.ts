@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GeminiClient } from '@/lib/gemini-client';
+import { streamingClient } from '@/lib/streaming-client';
+import { observabilityManager } from '@/lib/observability';
 import type { SuggestRequest, SuggestResponse, ApiResponse } from '@/types';
 
 // Geminiクライアントのシングルトンインスタンス
@@ -27,7 +29,7 @@ function initializeGeminiClient(): GeminiClient {
 }
 
 /**
- * POST /api/suggest - LLMによる校正提案の生成
+ * POST /api/suggest - LLMによる校正提案の生成（ストリーミング対応）
  */
 export async function POST(request: NextRequest): Promise<NextResponse<ApiResponse<SuggestResponse>>> {
   const startTime = Date.now();
@@ -194,10 +196,12 @@ export async function GET(): Promise<NextResponse<ApiResponse<{
   llmAvailable: boolean;
   model: string;
   responseTime?: number;
+  metrics?: any;
 }>>> {
   try {
     const client = initializeGeminiClient();
     const connectionTest = await client.testConnection();
+    const healthStatus = observabilityManager.getHealthStatus();
     
     const statusCode = connectionTest.success ? 200 : 503;
     
@@ -207,7 +211,8 @@ export async function GET(): Promise<NextResponse<ApiResponse<{
         status: connectionTest.success ? 'healthy' : 'unhealthy',
         llmAvailable: connectionTest.success,
         model: 'gemini-2.0-flash-exp',
-        responseTime: connectionTest.responseTime
+        responseTime: connectionTest.responseTime,
+        metrics: healthStatus.metrics
       }
     }, { status: statusCode });
   } catch (error) {

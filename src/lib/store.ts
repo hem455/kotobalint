@@ -12,6 +12,15 @@ import type {
   IssueSource
 } from '@/types';
 
+// 履歴管理用のインターフェース
+export interface TextHistory {
+  text: string;
+  issues: Issue[];
+  timestamp: number;
+  action: string; // 'edit' | 'apply_fix' | 'bulk_fix' | 'clear'
+  description?: string;
+}
+
 // アプリケーションの状態インターフェース
 interface AppState {
   // テキスト関連
@@ -34,6 +43,11 @@ interface AppState {
   
   // エラー状態
   error: string | null;
+  
+  // 履歴管理
+  history: TextHistory[];
+  historyIndex: number;
+  maxHistorySize: number;
 }
 
 // アクションインターフェース
@@ -70,6 +84,15 @@ interface AppActions {
   
   // 一括操作
   applyAllAutoFixes: () => void;
+  
+  // 履歴管理アクション
+  saveToHistory: (action: string, description?: string) => void;
+  undo: () => boolean;
+  redo: () => boolean;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
+  
+  // その他
   clearAll: () => void;
 }
 
@@ -132,13 +155,23 @@ export const useAppStore = create<AppState & AppActions>()(
       isSettingsOpen: false,
       activeTab: 'text',
       error: null,
+      history: [],
+      historyIndex: -1,
+      maxHistorySize: 50,
 
       // テキスト関連アクション
       setText: (text: string) => {
+        const currentText = get().text;
         set({ text });
         // テキストが変更されたら選択範囲をクリア
         if (get().selectedTextRange) {
           set({ selectedTextRange: null });
+        }
+        // 統計情報を更新
+        get().updateIssueStats();
+        // テキストが実際に変更された場合のみ履歴に保存
+        if (currentText !== text) {
+          get().saveToHistory('edit', 'テキストを編集');
         }
       },
 
@@ -181,21 +214,65 @@ export const useAppStore = create<AppState & AppActions>()(
         const issue = issues.find(i => i.id === issueId);
         
         if (!issue || !issue.suggestions || !issue.suggestions[suggestionIndex]) {
-          return;
+          console.warn('修正提案が見つかりません:', { issueId, suggestionIndex });
+          return { success: false, error: '修正提案が見つかりません' };
         }
 
         const suggestion = issue.suggestions[suggestionIndex];
-        const newText = text.slice(0, issue.range.start) + 
-                       suggestion.text + 
-                       text.slice(issue.range.end);
         
-        // テキストを更新
-        set({ text: newText });
-        
-        // 該当する問題を削除
-        const updatedIssues = issues.filter(i => i.id !== issueId);
-        set({ issues: updatedIssues });
-        get().updateIssueStats();
+        // テキスト範囲の検証
+        if (issue.range.start < 0 || issue.range.end > text.length || issue.range.start >= issue.range.end) {
+          console.error('無効なテキスト範囲:', issue.range);
+          return { success: false, error: '無効なテキスト範囲です' };
+        }
+
+        // 元のテキストの確認
+        const originalText = text.slice(issue.range.start, issue.range.end);
+        if (originalText !== issue.originalText) {
+          console.warn('テキストが変更されています。範囲を再計算します。');
+          // テキストが変更されている場合は、範囲を再計算する必要がある
+          // ここでは簡易的に元のテキストで検索
+          const newStart = text.indexOf(originalText);
+          if (newStart === -1) {
+            return { success: false, error: '元のテキストが見つかりません' };
+          }
+          issue.range.start = newStart;
+          issue.range.end = newStart + originalText.length;
+        }
+
+        try {
+          // テキストの置換
+          const newText = text.slice(0, issue.range.start) + 
+                         suggestion.text + 
+                         text.slice(issue.range.end);
+          
+          // テキストを更新
+          set({ text: newText });
+          
+          // 該当する問題を削除
+          const updatedIssues = issues.filter(i => i.id !== issueId);
+          set({ issues: updatedIssues });
+          get().updateIssueStats();
+
+          // 成功ログ
+          console.log('修正を適用しました:', {
+            issueId,
+            suggestionIndex,
+            originalText,
+            newText: suggestion.text,
+            range: issue.range
+          });
+
+          return { 
+            success: true, 
+            appliedText: suggestion.text,
+            originalText,
+            range: issue.range
+          };
+        } catch (error) {
+          console.error('修正適用エラー:', error);
+          return { success: false, error: '修正の適用に失敗しました' };
+        }
       },
 
       dismissIssue: (issueId: string) => {
@@ -281,40 +358,198 @@ export const useAppStore = create<AppState & AppActions>()(
         set({ error: null });
       },
 
-      // 一括操作
+      // 安全な一括修正機能
       applyAllAutoFixes: () => {
         const { issues, text } = get();
-        const autoFixIssues = issues.filter(issue => 
-          issue.metadata?.autoFix === true && issue.suggestions && issue.suggestions.length > 0
-        );
+        
+        // autoFix=trueかつ安全な修正のみをフィルタリング
+        const safeAutoFixIssues = issues.filter(issue => {
+          // autoFixフラグの確認
+          if (!issue.metadata?.autoFix) return false;
+          
+          // 提案が存在するか確認
+          if (!issue.suggestions || issue.suggestions.length === 0) return false;
+          
+          // 安全な修正かどうか確認（意味変化リスクゼロ）
+          const suggestion = issue.suggestions[0];
+          if (!this.isSafeFix(issue, suggestion)) return false;
+          
+          // テキスト範囲の検証
+          if (issue.range.start < 0 || issue.range.end > text.length || issue.range.start >= issue.range.end) {
+            return false;
+          }
+          
+          return true;
+        });
 
-        if (autoFixIssues.length === 0) {
-          return;
+        if (safeAutoFixIssues.length === 0) {
+          return {
+            success: true,
+            appliedCount: 0,
+            message: '適用可能な安全な修正がありません'
+          };
         }
 
-        // 位置の降順でソート（後ろから修正）
-        const sortedIssues = autoFixIssues.sort((a, b) => b.range.start - a.range.start);
+        // 位置の降順でソート（後ろから修正して位置ずれを防ぐ）
+        const sortedIssues = safeAutoFixIssues.sort((a, b) => b.range.start - a.range.start);
         
         let newText = text;
-        const appliedIssueIds: string[] = [];
+        const appliedFixes: Array<{
+          issueId: string;
+          originalText: string;
+          appliedText: string;
+          range: { start: number; end: number };
+        }> = [];
+        const failedFixes: Array<{
+          issueId: string;
+          error: string;
+        }> = [];
 
+        // 各修正を適用
         sortedIssues.forEach(issue => {
-          if (issue.suggestions && issue.suggestions[0]) {
-            const suggestion = issue.suggestions[0];
+          try {
+            const suggestion = issue.suggestions![0];
+            const originalText = newText.slice(issue.range.start, issue.range.end);
+            
+            // 元のテキストが期待通りか確認
+            if (originalText !== issue.originalText) {
+              console.warn(`テキストが変更されています: ${issue.id}`);
+              failedFixes.push({
+                issueId: issue.id,
+                error: 'テキストが変更されています'
+              });
+              return;
+            }
+
+            // テキストの置換
             newText = newText.slice(0, issue.range.start) + 
                      suggestion.text + 
                      newText.slice(issue.range.end);
-            appliedIssueIds.push(issue.id);
+            
+            appliedFixes.push({
+              issueId: issue.id,
+              originalText,
+              appliedText: suggestion.text,
+              range: issue.range
+            });
+          } catch (error) {
+            console.error(`修正適用エラー: ${issue.id}`, error);
+            failedFixes.push({
+              issueId: issue.id,
+              error: error instanceof Error ? error.message : '不明なエラー'
+            });
           }
         });
 
         // テキストと問題リストを更新
+        const appliedIssueIds = appliedFixes.map(fix => fix.issueId);
         const remainingIssues = issues.filter(issue => !appliedIssueIds.includes(issue.id));
+        
         set({ 
           text: newText, 
           issues: remainingIssues 
         });
         get().updateIssueStats();
+
+        return {
+          success: true,
+          appliedCount: appliedFixes.length,
+          failedCount: failedFixes.length,
+          appliedFixes,
+          failedFixes,
+          message: `${appliedFixes.length}件の修正を適用しました${failedFixes.length > 0 ? `（${failedFixes.length}件失敗）` : ''}`
+        };
+      },
+
+      // 安全な修正かどうかを判定
+      isSafeFix: (issue: Issue, suggestion: any): boolean => {
+        // 基本的な安全チェック
+        if (!suggestion || !suggestion.text) return false;
+        
+        // 意味変化リスクの低い修正のみを許可
+        const safeCategories = ['consistency', 'style'];
+        if (!safeCategories.includes(issue.category)) return false;
+        
+        // 重要度が低いもののみ
+        if (issue.severity === 'error') return false;
+        
+        // 提案の信頼度が高いもののみ
+        if (suggestion.confidence && suggestion.confidence < 0.8) return false;
+        
+        // 文字数が大きく変わらないもののみ（意味変化の可能性を下げる）
+        const originalLength = issue.originalText?.length || 0;
+        const suggestionLength = suggestion.text.length;
+        const lengthRatio = Math.abs(originalLength - suggestionLength) / originalLength;
+        if (lengthRatio > 0.5) return false; // 50%以上の変化は許可しない
+        
+        return true;
+      },
+
+      // 履歴管理機能
+      saveToHistory: (action: string, description?: string) => {
+        const { text, issues, history, historyIndex, maxHistorySize } = get();
+        
+        const newHistoryEntry: TextHistory = {
+          text,
+          issues: [...issues],
+          timestamp: Date.now(),
+          action,
+          description
+        };
+
+        // 現在の位置以降の履歴を削除（新しい履歴を追加するため）
+        const newHistory = history.slice(0, historyIndex + 1);
+        newHistory.push(newHistoryEntry);
+
+        // 履歴サイズ制限
+        if (newHistory.length > maxHistorySize) {
+          newHistory.shift();
+        } else {
+          // 履歴を追加した場合はインデックスを進める
+          set({ history: newHistory, historyIndex: newHistory.length - 1 });
+        }
+      },
+
+      undo: () => {
+        const { history, historyIndex } = get();
+        
+        if (historyIndex > 0) {
+          const previousEntry = history[historyIndex - 1];
+          set({
+            text: previousEntry.text,
+            issues: [...previousEntry.issues],
+            historyIndex: historyIndex - 1
+          });
+          get().updateIssueStats();
+          return true;
+        }
+        return false;
+      },
+
+      redo: () => {
+        const { history, historyIndex } = get();
+        
+        if (historyIndex < history.length - 1) {
+          const nextEntry = history[historyIndex + 1];
+          set({
+            text: nextEntry.text,
+            issues: [...nextEntry.issues],
+            historyIndex: historyIndex + 1
+          });
+          get().updateIssueStats();
+          return true;
+        }
+        return false;
+      },
+
+      canUndo: () => {
+        const { historyIndex } = get();
+        return historyIndex > 0;
+      },
+
+      canRedo: () => {
+        const { history, historyIndex } = get();
+        return historyIndex < history.length - 1;
       },
 
       clearAll: () => {

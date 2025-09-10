@@ -1,4 +1,10 @@
 import type { SuggestRequest, SuggestResponse, TextPassage, Issue, Suggestion, ContentStyle } from '@/types';
+import { piiDetector } from './pii-detector';
+import { promptSanitizer } from './prompt-sanitizer';
+import { schemaValidator } from './schema-validator';
+import { observabilityManager } from './observability';
+import { ErrorHandler, ErrorType } from './error-handler';
+import { config } from './config';
 
   /**
    * Gemini APIクライアント
@@ -23,7 +29,7 @@ export class GeminiClient {
   }
 
   /**
-   * テキストの校正提案を生成
+   * テキストの校正提案を生成（安全性機能統合版）
    */
   async generateSuggestions(request: SuggestRequest): Promise<{
     success: boolean;
@@ -42,11 +48,31 @@ export class GeminiClient {
         };
       }
 
-      // プロンプトの生成
-      const prompt = this.buildPrompt(request);
+      // 1. PII検出とマスキング
+      const { maskedPassages, piiMatches } = this.maskPII(request.passages);
+      if (piiMatches.length > 0) {
+        observabilityManager.recordPIIDetection(
+          maskedPassages.map(p => p.text).join(' '),
+          piiMatches
+        );
+      }
+
+      // 2. プロンプトの生成とサニタイズ
+      const sanitizedRequest = { ...request, passages: maskedPassages };
+      const prompt = this.buildPrompt(sanitizedRequest);
+      const sanitizedPrompt = promptSanitizer.sanitizePrompt(prompt, this.getSystemInstructions());
       
-      // Gemini APIへのリクエスト
-      const response = await this.callGeminiAPI(prompt);
+      if (sanitizedPrompt.warnings.length > 0) {
+        observabilityManager.recordPromptInjectionAttempt(
+          sanitizedPrompt.maskedText,
+          sanitizedPrompt.warnings
+        );
+      }
+
+      // 3. Gemini APIへのリクエスト（リトライ機能付き）
+      const response = await observabilityManager.retryWithBackoff(
+        () => this.callGeminiAPI(sanitizedPrompt.sanitizedText)
+      );
       
       if (!response.success) {
         return {
@@ -56,9 +82,42 @@ export class GeminiClient {
         };
       }
 
-      // レスポンスの解析
-      const { text, positionMapping } = this.concatenatePassages(request.passages);
-      const issues = this.parseResponse(response.content!, request.passages, positionMapping);
+      // 4. レスポンスのスキーマ検証
+      const validationResult = schemaValidator.validateLLMResponse(
+        JSON.parse(response.data!.content || '{}')
+      );
+
+      if (!validationResult.isValid) {
+        observabilityManager.recordSchemaValidationFailure(
+          sanitizedPrompt.maskedText,
+          validationResult.errors
+        );
+        
+        // フォールバック応答を返す
+        const fallbackResponse = schemaValidator.generateSafeFallback();
+        observabilityManager.recordSuccess(
+          sanitizedPrompt.maskedText,
+          fallbackResponse.issues,
+          Date.now() - startTime
+        );
+        
+        return {
+          success: true,
+          issues: fallbackResponse.issues,
+          elapsedMs: Date.now() - startTime
+        };
+      }
+
+      // 5. レスポンスの解析
+      const { text, positionMapping } = this.concatenatePassages(maskedPassages);
+      const issues = this.parseResponse(response.data!.content!, maskedPassages, positionMapping);
+      
+      // 6. 成功を記録
+      observabilityManager.recordSuccess(
+        sanitizedPrompt.maskedText,
+        issues,
+        Date.now() - startTime
+      );
       
       return {
         success: true,
@@ -67,13 +126,89 @@ export class GeminiClient {
       };
 
     } catch (error) {
-      console.error('Gemini API エラー:', error);
+      const errorInfo = ErrorHandler.classifyError(error instanceof Error ? error : new Error('不明なエラー'));
+      
+      // エラーログを記録
+      observabilityManager.recordAuditLog({
+        event: 'ERROR',
+        maskedInput: '[MASKED]',
+        fallbackOccurred: false,
+        metadata: {
+          errorType: errorInfo.type,
+          errorMessage: errorInfo.message,
+          severity: errorInfo.severity,
+          retryable: errorInfo.retryable
+        }
+      });
+
+      console.error('Gemini API エラー:', ErrorHandler.formatForLogging(error instanceof Error ? error : new Error('不明なエラー')));
+      
       return {
         success: false,
-        error: error instanceof Error ? error.message : '不明なエラーが発生しました',
+        error: errorInfo.userMessage,
         elapsedMs: Date.now() - startTime
       };
     }
+  }
+
+  /**
+   * PIIをマスク
+   */
+  private maskPII(passages: TextPassage[]): {
+    maskedPassages: TextPassage[];
+    piiMatches: any[];
+  } {
+    const maskedPassages: TextPassage[] = [];
+    const allPiiMatches: any[] = [];
+
+    for (const passage of passages) {
+      const maskedResult = piiDetector.detectAndMask(passage.text);
+      allPiiMatches.push(...maskedResult.piiMatches);
+
+      maskedPassages.push({
+        ...passage,
+        text: maskedResult.maskedText
+      });
+    }
+
+    return {
+      maskedPassages,
+      piiMatches: allPiiMatches
+    };
+  }
+
+  /**
+   * システム指示を取得
+   */
+  private getSystemInstructions(): string {
+    return `あなたは日本語の校正専門家です。以下のテキストを校正し、改善提案を行ってください。
+
+以下の形式でJSONレスポンスを返してください:
+{
+  "issues": [
+    {
+      "id": "unique_id",
+      "severity": "info|warn|error",
+      "category": "style|grammar|honorific|consistency|risk",
+      "message": "問題の説明",
+      "range": {"start": 0, "end": 10},
+      "suggestions": [
+        {
+          "text": "修正案",
+          "rationale": "修正理由",
+          "confidence": 0.8
+        }
+      ]
+    }
+  ]
+}
+
+注意事項:
+- 断定的でない表現を使用してください（「〜かもしれません」「〜を検討してください」など）
+- 最大${this.maxSuggestions}個の提案まで生成してください
+- 各提案には信頼度（confidence）を含めてください
+- 問題の範囲（range）は元のテキスト内の文字位置で指定してください
+- 重要度は適切に設定してください（info: 軽微、warn: 注意、error: 重要）`;
   }
 
   /**

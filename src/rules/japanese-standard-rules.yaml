@@ -68,10 +68,9 @@ rules:
     pattern: "(を行なう|を行う)"
     message: "冗長な表現です。より簡潔な表現に変更できます"
     autoFix: true
-    replacement: ""    examples:
+    replacement: "行う"
+    examples:
       - before: "を行なう"
-        after: "行う"
-      - before: "を行う"
         after: "行う"
     enabled: true
 

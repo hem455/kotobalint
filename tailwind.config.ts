@@ -69,12 +69,19 @@ const config: Config = {
       },
       fontFamily: {
         sans: [
-          'Inter',
-          'Noto Sans JP',
-          'system-ui',
+          'var(--font-noto-sans-jp)',
           '-apple-system',
           'BlinkMacSystemFont',
-          'sans-serif'
+          'Segoe UI',
+          'Roboto',
+          'Helvetica Neue',
+          'Arial',
+          'system-ui',
+          'sans-serif',
+          'Apple Color Emoji',
+          'Segoe UI Emoji',
+          'Segoe UI Symbol',
+          'Noto Color Emoji'
         ],
         mono: [
           'JetBrains Mono',

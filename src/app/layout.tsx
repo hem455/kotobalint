@@ -1,19 +1,5 @@
 import type { Metadata, Viewport } from 'next'
-import { Inter, Noto_Sans_JP } from 'next/font/google'
 import './globals.css'
-
-const inter = Inter({
-  subsets: ['latin'],
-  variable: '--font-inter',
-  display: 'swap',
-})
-
-const notoSansJP = Noto_Sans_JP({
-  subsets: ['latin'],
-  variable: '--font-noto-sans-jp',
-  weight: ['300', '400', '500', '700'],
-  display: 'swap',
-})
 
 export const metadata: Metadata = {
   title: {
@@ -78,7 +64,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="ja" className={`${inter.variable} ${notoSansJP.variable}`}>
+    <html lang="ja">
       <head>
         <link rel="icon" href="/favicon.ico" sizes="any" />
         <link rel="icon" href="/icon.svg" type="image/svg+xml" />
