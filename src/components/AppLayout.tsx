@@ -8,6 +8,7 @@ import TextEditor from './TextEditor';
 import IssueList from './IssueList';
 import IssueDetail from './IssueDetail';
 import Footer from './Footer';
+import SettingsModal from './SettingsModal';
 
 /**
  * メインアプリケーションレイアウト
@@ -142,6 +143,9 @@ export default function AppLayout() {
           </div>
         </div>
       )}
+
+      {/* 設定モーダル */}
+      <SettingsModal />
     </div>
   );
 }
