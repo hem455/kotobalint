@@ -9,6 +9,7 @@ import type {
   IssueCategory,
   Suggestion
 } from '@/types';
+import { performanceMonitor } from './performance-monitor';
 
 /**
  * 基本ルールエンジン
@@ -16,6 +17,7 @@ import type {
  */
 export class RuleEngine {
   private rules: Map<string, Rule> = new Map();
+  private regexCache: Map<string, RegExp> = new Map();
   private defaultConfig: RuleEngineConfig = {
     maxIssues: 100,
     timeout: 5000, // 5秒
@@ -53,6 +55,47 @@ export class RuleEngine {
    */
   clearRules(): void {
     this.rules.clear();
+    this.regexCache.clear();
+  }
+
+  /**
+   * 正規表現をキャッシュから取得またはコンパイル
+   */
+  private getCachedRegex(pattern: string, flags?: string): RegExp {
+    const key = `${pattern}:${flags || ''}`;
+    
+    if (this.regexCache.has(key)) {
+      return this.regexCache.get(key)!;
+    }
+
+    try {
+      const regex = new RegExp(pattern, flags);
+      this.regexCache.set(key, regex);
+      return regex;
+    } catch (error) {
+      console.warn(`無効な正規表現パターン: ${pattern}`, error);
+      // 無効なパターンの場合は空のマッチを返す
+      const emptyRegex = /(?!)/;
+      this.regexCache.set(key, emptyRegex);
+      return emptyRegex;
+    }
+  }
+
+  /**
+   * 正規表現キャッシュをクリア
+   */
+  clearRegexCache(): void {
+    this.regexCache.clear();
+  }
+
+  /**
+   * キャッシュ統計を取得
+   */
+  getCacheStats(): { rules: number; regex: number } {
+    return {
+      rules: this.rules.size,
+      regex: this.regexCache.size
+    };
   }
 
   /**
@@ -66,7 +109,7 @@ export class RuleEngine {
    * テキストを解析して問題を検出
    */
   async analyzeText(text: string, config?: Partial<RuleEngineConfig>): Promise<RuleEngineResult> {
-    const startTime = Date.now();
+    const startTime = performanceMonitor.startAnalysis();
     const mergedConfig = { ...this.defaultConfig, ...config };
 
     const context: RuleExecutionContext = {
@@ -83,7 +126,7 @@ export class RuleEngine {
       // 各ルールを実行
       for (const [ruleId, rule] of Array.from(this.rules)) {
         // タイムアウトチェック
-        if (Date.now() - startTime > (mergedConfig.timeout || 5000)) {
+        if (performance.now() - startTime > (mergedConfig.timeout || 5000)) {
           console.warn(`ルールエンジンのタイムアウト: ${mergedConfig.timeout}ms`);
           break;
         }
@@ -126,7 +169,18 @@ export class RuleEngine {
       console.error('ルールエンジン実行エラー:', error);
     }
 
-    const processingTime = Date.now() - startTime;
+    const processingTime = performance.now() - startTime;
+
+    // パフォーマンスメトリクスを記録
+    const metrics = performanceMonitor.endAnalysis(
+      startTime,
+      this.rules.size,
+      issues.length,
+      text.length,
+      this.getCacheStats()
+    );
+
+    console.log(`解析完了: ${metrics.analysisTime.toFixed(2)}ms, メモリ: ${metrics.memoryUsage.toFixed(2)}MB, キャッシュ: ${(metrics.cacheHitRate * 100).toFixed(1)}%`);
 
     return {
       issues,
@@ -193,13 +247,13 @@ export class RuleEngine {
   }
 
   /**
-   * 正規表現パターンマッチング
+   * 正規表現パターンマッチング（キャッシュ対応）
    */
   private findRegexMatches(text: string, pattern: RegExp): RegExpExecArray[] {
     const matches: RegExpExecArray[] = [];
     // 元のフラグに 'g' が含まれていない場合は追加
     const flags = pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g';
-    const regex = new RegExp(pattern.source, flags); // 新しいインスタンスを作成
+    const regex = this.getCachedRegex(pattern.source, flags);
     let match;
 
     while ((match = regex.exec(text)) !== null) {

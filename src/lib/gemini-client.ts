@@ -1,634 +1,194 @@
-import type { SuggestRequest, SuggestResponse, TextPassage, Issue, Suggestion, ContentStyle } from '@/types';
-import { piiDetector } from './pii-detector';
-import { promptSanitizer } from './prompt-sanitizer';
-import { schemaValidator } from './schema-validator';
-import { observabilityManager } from './observability';
-import { ErrorHandler, ErrorType } from './error-handler';
-import { config } from './config';
+/**
+ * Google Gemini 2.5 Flash クライアント
+ * JSON出力 + Thinking対応
+ */
 
-  /**
-   * Gemini APIクライアント
-   * ローカルGemini 2.0 Flash API (gemini-2.0-flash-exp) との通信を管理
-   */
-export class GeminiClient {
-  private baseUrl: string;
-  private apiKey: string;
-  private timeout: number;
-  private maxSuggestions: number;
+import "server-only";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-  constructor(config: {
-    baseUrl: string;
-    apiKey: string;
-    timeout?: number;
-    maxSuggestions?: number;
-  }) {
-    this.baseUrl = config.baseUrl.replace(/\/$/, ''); // 末尾のスラッシュを削除
-    this.apiKey = config.apiKey;
-    this.timeout = config.timeout || 10000;
-    this.maxSuggestions = config.maxSuggestions || 3;
+type RunGeminiArgs = {
+  apiKey?: string;
+  model?: string; // "gemini-2.5-flash" 既定
+  text: string;
+  timeoutMs?: number;
+  thinkingBudget?: number; // 例: 0 / 512 / 2048 / -1
+  // 構造化出力したいときのスキーマ（なければ通常テキスト）
+  responseSchema?: any;
+};
+
+export async function runGemini({
+  apiKey,
+  model = "gemini-2.5-flash",
+  text,
+  timeoutMs = 60000,
+  thinkingBudget = 512,
+  responseSchema,
+}: RunGeminiArgs): Promise<string> {
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is required");
   }
 
-  /**
-   * テキストの校正提案を生成（安全性機能統合版）
-   */
-  async generateSuggestions(request: SuggestRequest): Promise<{
-    success: boolean;
-    issues?: Issue[];
-    error?: string;
-    elapsedMs?: number;
-  }> {
-    const startTime = Date.now();
-    
-    try {
-      // リクエストの検証
-      if (!request.passages || request.passages.length === 0) {
-        return {
-          success: false,
-          error: 'テキスト抜粋が指定されていません'
-        };
-      }
+  const ai = new GoogleGenerativeAI(apiKey);
 
-      // 1. PII検出とマスキング
-      const { maskedPassages, piiMatches } = this.maskPII(request.passages);
-      if (piiMatches.length > 0) {
-        observabilityManager.recordPIIDetection(
-          maskedPassages.map(p => p.text).join(' '),
-          piiMatches
-        );
-      }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 
-      // 2. プロンプトの生成とサニタイズ
-      const sanitizedRequest = { ...request, passages: maskedPassages };
-      const prompt = this.buildPrompt(sanitizedRequest);
-      const sanitizedPrompt = promptSanitizer.sanitizePrompt(prompt, this.getSystemInstructions());
-      
-      if (sanitizedPrompt.warnings.length > 0) {
-        observabilityManager.recordPromptInjectionAttempt(
-          sanitizedPrompt.maskedText,
-          sanitizedPrompt.warnings
-        );
-      }
-
-      // 3. Gemini APIへのリクエスト（リトライ機能付き）
-      const response = await observabilityManager.retryWithBackoff(
-        () => this.callGeminiAPI(sanitizedPrompt.sanitizedText)
-      );
-      
-      if (!response.success) {
-        return {
-          success: false,
-          error: response.error,
-          elapsedMs: Date.now() - startTime
-        };
-      }
-
-      // 4. レスポンスのスキーマ検証
-      const validationResult = schemaValidator.validateLLMResponse(
-        JSON.parse(response.data!.content || '{}')
-      );
-
-      if (!validationResult.isValid) {
-        observabilityManager.recordSchemaValidationFailure(
-          sanitizedPrompt.maskedText,
-          validationResult.errors
-        );
-        
-        // フォールバック応答を返す
-        const fallbackResponse = schemaValidator.generateSafeFallback();
-        observabilityManager.recordSuccess(
-          sanitizedPrompt.maskedText,
-          fallbackResponse.issues,
-          Date.now() - startTime
-        );
-        
-        return {
-          success: true,
-          issues: fallbackResponse.issues,
-          elapsedMs: Date.now() - startTime
-        };
-      }
-
-      // 5. レスポンスの解析
-      const { text, positionMapping } = this.concatenatePassages(maskedPassages);
-      const issues = this.parseResponse(response.data!.content!, maskedPassages, positionMapping);
-      
-      // 6. 成功を記録
-      observabilityManager.recordSuccess(
-        sanitizedPrompt.maskedText,
-        issues,
-        Date.now() - startTime
-      );
-      
-      return {
-        success: true,
-        issues,
-        elapsedMs: Date.now() - startTime
-      };
-
-    } catch (error) {
-      const errorInfo = ErrorHandler.classifyError(error instanceof Error ? error : new Error('不明なエラー'));
-      
-      // エラーログを記録
-      observabilityManager.recordAuditLog({
-        event: 'ERROR',
-        maskedInput: '[MASKED]',
-        fallbackOccurred: false,
-        metadata: {
-          errorType: errorInfo.type,
-          errorMessage: errorInfo.message,
-          severity: errorInfo.severity,
-          retryable: errorInfo.retryable
-        }
-      });
-
-      console.error('Gemini API エラー:', ErrorHandler.formatForLogging(error instanceof Error ? error : new Error('不明なエラー')));
-      
-      return {
-        success: false,
-        error: errorInfo.userMessage,
-        elapsedMs: Date.now() - startTime
-      };
+  try {
+    const config: any = {};
+    if (responseSchema) {
+      config.responseMimeType = "application/json";
+      config.responseSchema = responseSchema;
     }
+
+    const modelInstance = ai.getGenerativeModel({ 
+      model,
+      generationConfig: config
+    });
+
+    const result = await modelInstance.generateContent(text);
+
+    return result.response.text();
+  } finally {
+    clearTimeout(timer);
   }
-
-  /**
-   * PIIをマスク
-   */
-  private maskPII(passages: TextPassage[]): {
-    maskedPassages: TextPassage[];
-    piiMatches: any[];
-  } {
-    const maskedPassages: TextPassage[] = [];
-    const allPiiMatches: any[] = [];
-
-    for (const passage of passages) {
-      const maskedResult = piiDetector.detectAndMask(passage.text);
-      allPiiMatches.push(...maskedResult.piiMatches);
-
-      maskedPassages.push({
-        ...passage,
-        text: maskedResult.maskedText
-      });
-    }
-
-    return {
-      maskedPassages,
-      piiMatches: allPiiMatches
-    };
-  }
-
-  /**
-   * システム指示を取得
-   */
-  private getSystemInstructions(): string {
-    return `あなたは日本語の校正専門家です。以下のテキストを校正し、改善提案を行ってください。
-
-以下の形式でJSONレスポンスを返してください:
-{
-  "issues": [
-    {
-      "id": "unique_id",
-      "severity": "info|warn|error",
-      "category": "style|grammar|honorific|consistency|risk",
-      "message": "問題の説明",
-      "range": {"start": 0, "end": 10},
-      "suggestions": [
-        {
-          "text": "修正案",
-          "rationale": "修正理由",
-          "confidence": 0.8
-        }
-      ]
-    }
-  ]
 }
 
-注意事項:
-- 断定的でない表現を使用してください（「〜かもしれません」「〜を検討してください」など）
-- 最大${this.maxSuggestions}個の提案まで生成してください
-- 各提案には信頼度（confidence）を含めてください
-- 問題の範囲（range）は元のテキスト内の文字位置で指定してください
-- 重要度は適切に設定してください（info: 軽微、warn: 注意、error: 重要）`;
+/**
+ * 校正用の構造化出力スキーマ
+ */
+export const issueSchema = {
+  type: "object",
+  properties: {
+    issues: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          ruleId: { type: "string" },
+          severity: { type: "string", enum: ["info", "warn", "error"] },
+          message: { type: "string" },
+          start: { type: "integer" },
+          end: { type: "integer" },
+          suggestion: { type: "string" },
+          range: {
+            type: "object",
+            properties: {
+              start: { type: "integer" },
+              end: { type: "integer" }
+            },
+            required: ["start", "end"]
+          }
+        },
+        required: ["id", "ruleId", "severity", "message"],
+        propertyOrdering: ["id", "ruleId", "severity", "message", "start", "end", "suggestion", "range"]
+      }
+    }
+  },
+  required: ["issues"],
+  propertyOrdering: ["issues"]
+};
+
+/**
+ * 校正提案を生成（構造化出力版）
+ */
+export async function generateProofreadingSuggestions({
+  apiKey,
+  model = "gemini-2.5-flash",
+  text,
+  timeoutMs = 30000,
+  thinkingBudget = 512,
+}: {
+  apiKey: string;
+  model?: string;
+  text: string;
+  timeoutMs?: number;
+  thinkingBudget?: number;
+}): Promise<{
+  success: boolean;
+  issues?: import('@/types').Issue[];
+  error?: string;
+  elapsedMs?: number;
+}> {
+  const startTime = Date.now();
+  
+  if (!apiKey) {
+    return {
+      success: false,
+      error: "GEMINI_API_KEY is required",
+      elapsedMs: Date.now() - startTime
+    };
   }
+  
+  try {
+    const prompt = `あなたは日本語の校正専門家です。以下のテキストを校正し、改善提案を行ってください。
 
-  /**
-   * プロンプトを構築
-   */
-  private buildPrompt(request: SuggestRequest): string {
-    const { passages, style, context } = request;
-    
-    // テキスト抜粋を結合（位置マッピングを保持）
-    const { text, positionMapping } = this.concatenatePassages(passages);
-    
-    // コンテキスト情報
-    const contextInfo = context ? 
-      `前後の文脈:\n前: ${context.beforeText || 'なし'}\n後: ${context.afterText || 'なし'}\n` : '';
-
-    // スタイルに応じた指示
-    const styleInstructions = this.getStyleInstructions(style);
-
-    return `あなたは日本語の校正専門家です。以下のテキストを校正し、改善提案を行ってください。
-
-${contextInfo}テキスト:
+テキスト:
 ${text}
 
-${styleInstructions}
+必ず以下のJSON形式で応答してください。他のテキストは一切含めず、JSONのみを返してください:
 
-以下の形式でJSONレスポンスを返してください:
 {
   "issues": [
     {
-      "id": "unique_id",
-      "severity": "info|warn|error",
-      "category": "style|grammar|honorific|consistency|risk",
+      "id": "issue_1",
+      "ruleId": "grammar_check",
+      "severity": "info",
       "message": "問題の説明",
-      "range": {"start": 0, "end": 10},
-      "suggestions": [
-        {
-          "text": "修正案",
-          "rationale": "修正理由",
-          "confidence": 0.8
-        }
-      ]
+      "start": 0,
+      "end": 5,
+      "suggestion": "修正案",
+      "range": {
+        "start": 0,
+        "end": 5
+      }
     }
   ]
 }
 
 注意事項:
+- 必ずJSON形式で応答してください
 - 断定的でない表現を使用してください（「〜かもしれません」「〜を検討してください」など）
-- 最大${this.maxSuggestions}個の提案まで生成してください
-- 各提案には信頼度（confidence）を含めてください
-- 問題の範囲（range）は元のテキスト内の文字位置で指定してください
-- 重要度は適切に設定してください（info: 軽微、warn: 注意、error: 重要）`;
-  }
+- 最大3個の提案まで生成してください
+- 問題の範囲（start, end）は元のテキスト内の文字位置で指定してください
+- 重要度は適切に設定してください（info: 軽微、warn: 注意、error: 重要）
+- 問題がない場合は空の配列を返してください: {"issues": []}`;
 
-  /**
-   * テキスト抜粋を結合し、位置マッピングを生成
-   */
-  private concatenatePassages(passages: TextPassage[]): {
-    text: string;
-    positionMapping: { passageIndex: number; startOffset: number }[];
-  } {
-    const positionMapping: { passageIndex: number; startOffset: number }[] = [];
-    const parts: string[] = [];
-    const separator = '\n---PASSAGE_SEPARATOR---\n';
-    
-    let currentOffset = 0;
-    
-    for (let i = 0; i < passages.length; i++) {
-      const passage = passages[i];
-      
-      // 位置マッピングを記録
-      positionMapping.push({
-        passageIndex: i,
-        startOffset: currentOffset
-      });
-      
-      // パッセージIDを付けてテキストを追加
-      parts.push(`[Passage ${i + 1}] ${passage.text}`);
-      
-      // 次のパッセージとの間にセパレータを追加（最後のパッセージ以外）
-      if (i < passages.length - 1) {
-        parts.push(separator);
-        currentOffset += passage.text.length + separator.length;
-      } else {
-        currentOffset += passage.text.length;
-      }
+    const response = await runGemini({
+      apiKey,
+      model,
+      text: prompt,
+      timeoutMs,
+      thinkingBudget,
+      responseSchema: issueSchema,
+    });
+
+    console.log('Gemini raw response:', response);
+
+    // マークダウンのコードブロックを除去
+    let cleanResponse = response;
+    if (cleanResponse.includes('```json')) {
+      cleanResponse = cleanResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '');
     }
+    if (cleanResponse.includes('```')) {
+      cleanResponse = cleanResponse.replace(/```\n?/g, '');
+    }
+
+    console.log('Cleaned response:', cleanResponse);
+
+    const parsed = JSON.parse(cleanResponse);
     
     return {
-      text: parts.join(''),
-      positionMapping
-    };
-  }
-
-  /**
-   * スタイルに応じた指示を取得
-   */
-  private getStyleInstructions(style: ContentStyle): string {
-    const instructions = {
-      blog: 'ブログ記事として読みやすく、親しみやすい文体で校正してください。',
-      business: 'ビジネス文書として適切で、丁寧で正確な表現を心がけてください。',
-      academic: '学術論文として適切で、客観的で正確な表現を心がけてください。',
-      technical: '技術文書として適切で、専門用語の使用と正確性を重視してください。',
-      casual: 'カジュアルな文体で、自然で親しみやすい表現を心がけてください。'
+      success: true,
+      issues: parsed.issues || [],
+      elapsedMs: Date.now() - startTime
     };
 
-    return instructions[style] || instructions.business;
-  }
-
-  /**
-   * Gemini APIを呼び出し
-   */
-  private async callGeminiAPI(prompt: string): Promise<{
-    success: boolean;
-    content?: string;
-    error?: string;
-  }> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-
-    try {
-      const response = await fetch(`${this.baseUrl}/v1beta/models/gemini-2.0-flash-exp:generateContent`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: prompt
-            }]
-          }],
-          generationConfig: {
-            temperature: 0.3,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 2048,
-          },
-          safetySettings: [
-            {
-              category: 'HARM_CATEGORY_HARASSMENT',
-              threshold: 'BLOCK_MEDIUM_AND_ABOVE'
-            },
-            {
-              category: 'HARM_CATEGORY_HATE_SPEECH',
-              threshold: 'BLOCK_MEDIUM_AND_ABOVE'
-            },
-            {
-              category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
-              threshold: 'BLOCK_MEDIUM_AND_ABOVE'
-            },
-            {
-              category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
-              threshold: 'BLOCK_MEDIUM_AND_ABOVE'
-            }
-          ]
-        }),
-        signal: controller.signal
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        return {
-          success: false,
-          error: `API エラー (${response.status}): ${errorText}`
-        };
-      }
-
-      const data = await response.json();
-      
-      if (!data.candidates || data.candidates.length === 0) {
-        return {
-          success: false,
-          error: 'API から有効なレスポンスが返されませんでした'
-        };
-      }
-
-      const content = data.candidates[0].content?.parts?.[0]?.text;
-      if (!content) {
-        return {
-          success: false,
-          error: 'API レスポンスにテキストが含まれていません'
-        };
-      }
-
-      return {
-        success: true,
-        content
-      };
-
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        return {
-          success: false,
-          error: `リクエストがタイムアウトしました (${this.timeout}ms)`
-        };
-      }
-
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'API 呼び出しエラー'
-      };
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  /**
-   * APIレスポンスを解析してIssue配列に変換
-   */
-  private parseResponse(content: string, passages: TextPassage[], positionMapping: { passageIndex: number; startOffset: number }[]): Issue[] {
-    try {
-      // JSON部分を抽出（改善されたロジック）
-      let jsonString = content;
-      
-      // まず ```json コードブロックを探す
-      const jsonBlockMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-      if (jsonBlockMatch) {
-        jsonString = jsonBlockMatch[1];
-      } else {
-        // コードブロックが見つからない場合、最初の '{' と最後の '}' を探す
-        const firstBrace = content.indexOf('{');
-        const lastBrace = content.lastIndexOf('}');
-        
-        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-          jsonString = content.substring(firstBrace, lastBrace + 1);
-        }
-      }
-      
-      const parsed = JSON.parse(jsonString);
-      
-      if (!parsed.issues || !Array.isArray(parsed.issues)) {
-        console.warn('API レスポンスに issues 配列がありません');
-        return [];
-      }
-
-      const issues: Issue[] = [];
-      
-      for (const issueData of parsed.issues) {
-        try {
-          const issue = this.convertToIssue(issueData, passages, positionMapping);
-          if (issue) {
-            issues.push(issue);
-          }
-        } catch (error) {
-          console.warn('Issue の変換エラー:', error, issueData);
-        }
-      }
-
-      return issues;
-
-    } catch (error) {
-      console.error('API レスポンスの解析エラー:', error);
-      console.error('レスポンス内容:', content);
-      return [];
-    }
-  }
-
-  /**
-   * APIレスポンスのIssueデータをIssueオブジェクトに変換
-   */
-  private convertToIssue(issueData: any, passages: TextPassage[], positionMapping: { passageIndex: number; startOffset: number }[]): Issue | null {
-    try {
-      // 必須フィールドの検証
-      if (!issueData.id || !issueData.message || !issueData.range) {
-        return null;
-      }
-
-      // 範囲の検証と調整
-      const range = this.adjustRange(issueData.range, passages, positionMapping);
-      if (!range) {
-        return null;
-      }
-
-      // 提案の変換
-      const suggestions: Suggestion[] = [];
-      if (issueData.suggestions && Array.isArray(issueData.suggestions)) {
-        for (const suggestionData of issueData.suggestions) {
-          if (suggestionData.text) {
-            suggestions.push({
-              text: suggestionData.text,
-              rationale: suggestionData.rationale || 'LLMによる提案',
-              confidence: Math.max(0, Math.min(1, suggestionData.confidence || 0.5)),
-              isPreferred: suggestionData.isPreferred || false
-            });
-          }
-        }
-      }
-
-      return {
-        id: `llm_${issueData.id}_${Date.now()}`,
-        source: 'llm',
-        severity: this.validateSeverity(issueData.severity) || 'info',
-        category: this.validateCategory(issueData.category) || 'style',
-        message: issueData.message,
-        range,
-        suggestions,
-        metadata: {
-          llmGenerated: true,
-          confidence: issueData.confidence || 0.5
-        }
-      };
-
-    } catch (error) {
-      console.warn('Issue 変換エラー:', error);
-      return null;
-    }
-  }
-
-  /**
-   * 範囲を調整（passages内の相対位置に変換）
-   */
-  private adjustRange(range: { start: number; end: number }, passages: TextPassage[], positionMapping: { passageIndex: number; startOffset: number }[]): { start: number; end: number } | null {
-    if (passages.length === 0 || positionMapping.length === 0) {
-      return null;
-    }
-
-    // 範囲がどのパッセージに属するかを特定
-    let targetPassageIndex = 0;
-    for (let i = 0; i < positionMapping.length; i++) {
-      const mapping = positionMapping[i];
-      const passage = passages[mapping.passageIndex];
-      const passageEnd = mapping.startOffset + passage.text.length;
-      
-      if (range.start >= mapping.startOffset && range.start < passageEnd) {
-        targetPassageIndex = i;
-        break;
-      }
-    }
-
-    const targetMapping = positionMapping[targetPassageIndex];
-    const targetPassage = passages[targetMapping.passageIndex];
-    
-    // パッセージ内の相対位置に変換
-    const relativeStart = range.start - targetMapping.startOffset;
-    const relativeEnd = range.end - targetMapping.startOffset;
-    
-    // パッセージの範囲内に収まるように調整
-    const adjustedStart = Math.max(0, Math.min(relativeStart, targetPassage.text.length));
-    const adjustedEnd = Math.max(0, Math.min(relativeEnd, targetPassage.text.length));
-    
-    if (adjustedStart >= adjustedEnd) {
-      return null;
-    }
-
-    // 元のドキュメント内の絶対位置に変換
+  } catch (error) {
     return {
-      start: targetPassage.range.start + adjustedStart,
-      end: targetPassage.range.start + adjustedEnd
+      success: false,
+      error: error instanceof Error ? error.message : '不明なエラー',
+      elapsedMs: Date.now() - startTime
     };
-  }
-
-  /**
-   * 重要度の検証
-   */
-  private validateSeverity(severity: any): 'info' | 'warn' | 'error' | null {
-    if (typeof severity === 'string' && ['info', 'warn', 'error'].includes(severity)) {
-      return severity as 'info' | 'warn' | 'error';
-    }
-    return null;
-  }
-
-  /**
-   * カテゴリの検証
-   */
-  private validateCategory(category: any): 'style' | 'grammar' | 'honorific' | 'consistency' | 'risk' | null {
-    if (typeof category === 'string' && ['style', 'grammar', 'honorific', 'consistency', 'risk'].includes(category)) {
-      return category as 'style' | 'grammar' | 'honorific' | 'consistency' | 'risk';
-    }
-    return null;
-  }
-
-  /**
-   * 設定を更新
-   */
-  updateConfig(config: {
-    baseUrl?: string;
-    apiKey?: string;
-    timeout?: number;
-    maxSuggestions?: number;
-  }): void {
-    if (config.baseUrl) {
-      this.baseUrl = config.baseUrl.replace(/\/$/, '');
-    }
-    if (config.apiKey !== undefined && typeof config.apiKey === 'string' && config.apiKey.length > 0) {
-      this.apiKey = config.apiKey;
-    }
-    if (config.timeout !== undefined) {
-      this.timeout = config.timeout;
-    }
-    if (config.maxSuggestions !== undefined) {
-      this.maxSuggestions = config.maxSuggestions;
-    }
-  }
-
-  /**
-   * 接続テスト
-   */
-  async testConnection(): Promise<{
-    success: boolean;
-    error?: string;
-    responseTime?: number;
-  }> {
-    const startTime = Date.now();
-    
-    try {
-      const testPrompt = 'こんにちは。これは接続テストです。';
-      const response = await this.callGeminiAPI(testPrompt);
-      
-      return {
-        success: response.success,
-        error: response.error,
-        responseTime: Date.now() - startTime
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : '接続テストエラー',
-        responseTime: Date.now() - startTime
-      };
-    }
   }
 }

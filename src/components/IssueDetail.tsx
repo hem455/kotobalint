@@ -1,44 +1,49 @@
 'use client';
 
-import React from 'react';
+import React, { memo } from 'react';
 import { useSelectedIssue } from '@/lib/hooks';
 import { IssueSeverity, IssueCategory } from '@/types';
+import { 
+  getSeverityAccessibilityInfo, 
+  getCategoryAccessibilityInfo, 
+  generateIssueDescription,
+  getFocusIndicatorClasses,
+  getAccessibleAnimationClasses
+} from '@/lib/accessibility-utils';
 
 /**
  * 問題詳細コンポーネント
  * 選択された問題の詳細情報表示と修正提案の適用機能
  */
-export default function IssueDetail() {
+const IssueDetail = memo(function IssueDetail() {
   const { issue: selectedIssue, applySuggestion, dismissIssue } = useSelectedIssue();
 
   // 重要度バッジコンポーネント
-  const SeverityBadge = ({ severity }: { severity: IssueSeverity }) => (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-        severity === 'error'
-          ? 'bg-red-100 text-red-800'
-          : severity === 'warn'
-          ? 'bg-yellow-100 text-yellow-800'
-          : 'bg-blue-100 text-blue-800'
-      }`}
-    >
-      {severity === 'error' ? 'エラー' : severity === 'warn' ? '警告' : '情報'}
-    </span>
-  );
+  const SeverityBadge = ({ severity }: { severity: IssueSeverity }) => {
+    const severityInfo = getSeverityAccessibilityInfo(severity);
+    return (
+      <span
+        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${severityInfo.colorClass}`}
+        role="img"
+        aria-label={severityInfo.ariaLabel}
+      >
+        <span aria-hidden="true">{severityInfo.icon}</span>
+        <span className="ml-1">{severityInfo.label}</span>
+      </span>
+    );
+  };
 
   // カテゴリタグコンポーネント
   const CategoryTag = ({ category }: { category: IssueCategory }) => {
-    const categoryLabels: Record<IssueCategory, string> = {
-      style: 'スタイル',
-      grammar: '文法',
-      honorific: '敬語',
-      consistency: '一貫性',
-      risk: 'リスク'
-    };
-
+    const categoryInfo = getCategoryAccessibilityInfo(category);
     return (
-      <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
-        {categoryLabels[category]}
+      <span 
+        className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-700"
+        role="img"
+        aria-label={categoryInfo.ariaLabel}
+        title={categoryInfo.description}
+      >
+        {categoryInfo.label}
       </span>
     );
   };
@@ -60,8 +65,8 @@ export default function IssueDetail() {
   // 問題が選択されていない場合
   if (!selectedIssue) {
     return (
-      <div className="py-6 text-center text-sm text-slate-500">
-        <svg className="mx-auto h-12 w-12 text-slate-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <div className="py-6 text-center text-sm text-slate-500" role="status" aria-live="polite">
+        <svg className="mx-auto h-12 w-12 text-slate-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
         </svg>
         <p>問題を選択して詳細を表示</p>
@@ -69,8 +74,11 @@ export default function IssueDetail() {
     );
   }
 
+  // 問題の詳細説明を生成
+  const issueDescription = generateIssueDescription(selectedIssue);
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" role="region" aria-label="問題詳細">
       {/* ヘッダー情報 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -80,10 +88,11 @@ export default function IssueDetail() {
         <div className="flex items-center gap-2">
           <button
             onClick={handleDismissIssue}
-            className="text-xs text-slate-500 hover:text-slate-700"
+            className={`text-xs text-slate-500 hover:text-slate-700 ${getFocusIndicatorClasses()}`}
             title="この問題を無視"
+            aria-label="この問題を無視"
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -93,8 +102,11 @@ export default function IssueDetail() {
       {/* 問題メッセージ */}
       <div>
         <div className="text-xs font-medium text-slate-500 mb-1">問題</div>
-        <div className="text-sm text-slate-800 leading-relaxed">
+        <div className="text-sm text-slate-800 leading-relaxed" aria-describedby="issue-description">
           {selectedIssue.message}
+        </div>
+        <div id="issue-description" className="sr-only">
+          {issueDescription}
         </div>
       </div>
 
@@ -148,12 +160,13 @@ export default function IssueDetail() {
                   <div className="flex flex-col gap-1">
                     <button
                       onClick={() => handleApplySuggestion(index)}
-                      className="btn-primary text-xs px-3 py-1"
+                      className={`btn-primary text-xs px-3 py-1 ${getFocusIndicatorClasses()}`}
+                      aria-label={`修正案${index + 1}を適用`}
                     >
                       適用
                     </button>
                     {suggestion.isPreferred && (
-                      <span className="text-xs text-green-600 font-medium">
+                      <span className="text-xs text-green-600 font-medium" role="status" aria-label="推奨修正案">
                         推奨
                       </span>
                     )}
@@ -193,14 +206,16 @@ export default function IssueDetail() {
           {selectedIssue.suggestions && selectedIssue.suggestions.length > 0 && (
             <button
               onClick={() => handleApplySuggestion(0)}
-              className="btn-primary text-sm px-4 py-2 flex-1"
+              className={`btn-primary text-sm px-4 py-2 flex-1 ${getFocusIndicatorClasses()}`}
+              aria-label="最初の修正案を適用"
             >
               最初の修正案を適用
             </button>
           )}
           <button
             onClick={handleDismissIssue}
-            className="btn-secondary text-sm px-4 py-2"
+            className={`btn-secondary text-sm px-4 py-2 ${getFocusIndicatorClasses()}`}
+            aria-label="この問題を無視"
           >
             無視
           </button>
@@ -208,4 +223,6 @@ export default function IssueDetail() {
       </div>
     </div>
   );
-}
+});
+
+export default IssueDetail;

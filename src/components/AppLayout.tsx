@@ -6,6 +6,7 @@ import { initializeStore } from '@/lib/store-utils';
 import Header from './Header';
 import TextEditor from './TextEditor';
 import IssueList from './IssueList';
+import VirtualizedIssueList from './VirtualizedIssueList';
 import IssueDetail from './IssueDetail';
 import Footer from './Footer';
 import SettingsModal from './SettingsModal';

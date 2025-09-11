@@ -1,16 +1,24 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, memo } from 'react';
 import { useIssues, useSelectedIssue } from '@/lib/hooks';
 import { IssueSeverity, IssueCategory, IssueSource } from '@/types';
+import { 
+  getSeverityAccessibilityInfo, 
+  getCategoryAccessibilityInfo, 
+  generateIssueDescription,
+  generateIssueListDescription,
+  getFocusIndicatorClasses,
+  getAccessibleAnimationClasses
+} from '@/lib/accessibility-utils';
 
 /**
  * 問題リストコンポーネント
  * 問題の種別・重要度・カテゴリ別表示とフィルタリング機能
  */
-export default function IssueList() {
+const IssueList = memo(function IssueList() {
   const {
-    issues,
+    issues: filteredIssues,
     stats,
     filters,
     filterIssuesBySource,
@@ -22,79 +30,93 @@ export default function IssueList() {
   const { selectIssue, issue: selectedIssue } = useSelectedIssue();
 
   // 重要度バッジコンポーネント
-  const SeverityBadge = ({ severity }: { severity: IssueSeverity }) => (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-        severity === 'error'
-          ? 'bg-red-100 text-red-800'
-          : severity === 'warn'
-          ? 'bg-yellow-100 text-yellow-800'
-          : 'bg-blue-100 text-blue-800'
-      }`}
-    >
-      {severity === 'error' ? 'エラー' : severity === 'warn' ? '警告' : '情報'}
-    </span>
-  );
+  const SeverityBadge = ({ severity }: { severity: IssueSeverity }) => {
+    const severityInfo = getSeverityAccessibilityInfo(severity);
+    return (
+      <span
+        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${severityInfo.colorClass}`}
+        role="img"
+        aria-label={severityInfo.ariaLabel}
+      >
+        <span aria-hidden="true">{severityInfo.icon}</span>
+        <span className="ml-1">{severityInfo.label}</span>
+      </span>
+    );
+  };
 
   // カテゴリタグコンポーネント
   const CategoryTag = ({ category }: { category: IssueCategory }) => {
-    const categoryLabels: Record<IssueCategory, string> = {
-      style: 'スタイル',
-      grammar: '文法',
-      honorific: '敬語',
-      consistency: '一貫性',
-      risk: 'リスク'
-    };
-
+    const categoryInfo = getCategoryAccessibilityInfo(category);
     return (
-      <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
-        {categoryLabels[category]}
+      <span 
+        className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-700"
+        role="img"
+        aria-label={categoryInfo.ariaLabel}
+        title={categoryInfo.description}
+      >
+        {categoryInfo.label}
       </span>
     );
   };
 
   // ソースフィルター
   const SourceFilter = () => (
-    <div className="flex gap-2">
-      {(['all', 'rule', 'llm'] as const).map((source) => (
-        <button
-          key={source}
-          onClick={() => filterIssuesBySource(source === 'all' ? [] : [source])}
-          className={`rounded-full px-3 py-1 text-sm border ${
-            (filters.source?.length === 0 && source === 'all') || 
-            (filters.source?.includes(source as IssueSource))
-              ? 'bg-slate-900 text-white'
-              : 'bg-white text-slate-700 hover:bg-slate-50'
-          }`}
-        >
-          {source === 'all' ? 'すべて' : source === 'rule' ? 'ルール' : 'AI'}
-        </button>
-      ))}
+    <div className="flex gap-2" role="group" aria-label="ソースフィルター">
+      {(['all', 'rule', 'llm'] as const).map((source) => {
+        const isSelected = (filters.source?.length === 0 && source === 'all') || 
+          (filters.source?.includes(source as IssueSource));
+        const sourceLabel = source === 'all' ? 'すべて' : source === 'rule' ? 'ルール' : 'AI';
+        
+        return (
+          <button
+            key={source}
+            onClick={() => filterIssuesBySource(source === 'all' ? [] : [source])}
+            className={`rounded-full px-3 py-1 text-sm border ${getFocusIndicatorClasses()} ${
+              isSelected
+                ? 'bg-slate-900 text-white'
+                : 'bg-white text-slate-700 hover:bg-slate-50'
+            }`}
+            aria-pressed={isSelected}
+            aria-label={`${sourceLabel}でフィルター${isSelected ? '（選択中）' : ''}`}
+          >
+            {sourceLabel}
+          </button>
+        );
+      })}
     </div>
   );
 
   // 重要度フィルター
   const SeverityFilter = () => (
-    <div className="flex flex-wrap gap-2">
-      {(['info', 'warn', 'error'] as IssueSeverity[]).map((severity) => (
-        <label key={severity} className="inline-flex cursor-pointer items-center gap-1 text-xs text-slate-700">
-          <input
-            type="checkbox"
-            checked={filters.severity?.includes(severity) || false}
-            onChange={(e) => {
-              const current = new Set(filters.severity || []);
-              if (e.target.checked) {
-                current.add(severity);
-              } else {
-                current.delete(severity);
-              }
-              filterIssuesBySeverity(Array.from(current));
-            }}
-            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-          />
-          <SeverityBadge severity={severity} />
-        </label>
-      ))}
+    <div className="flex flex-wrap gap-2" role="group" aria-label="重要度フィルター">
+      {(['info', 'warn', 'error'] as IssueSeverity[]).map((severity) => {
+        const isChecked = filters.severity?.includes(severity) || false;
+        const severityInfo = getSeverityAccessibilityInfo(severity);
+        
+        return (
+          <label key={severity} className="inline-flex cursor-pointer items-center gap-1 text-xs text-slate-700">
+            <input
+              type="checkbox"
+              checked={isChecked}
+              onChange={(e) => {
+                const current = new Set(filters.severity || []);
+                if (e.target.checked) {
+                  current.add(severity);
+                } else {
+                  current.delete(severity);
+                }
+                filterIssuesBySeverity(Array.from(current));
+              }}
+              className={`rounded border-gray-300 text-blue-600 ${getFocusIndicatorClasses()}`}
+              aria-describedby={`severity-${severity}-description`}
+            />
+            <SeverityBadge severity={severity} />
+            <span id={`severity-${severity}-description`} className="sr-only">
+              {severityInfo.ariaLabel}でフィルター{isChecked ? '（選択中）' : ''}
+            </span>
+          </label>
+        );
+      })}
     </div>
   );
 
@@ -103,26 +125,35 @@ export default function IssueList() {
     const categories: IssueCategory[] = ['style', 'grammar', 'honorific', 'consistency', 'risk'];
     
     return (
-      <div className="flex flex-wrap gap-2">
-        {categories.map((category) => (
-          <label key={category} className="inline-flex cursor-pointer items-center gap-1 text-xs text-slate-700">
-            <input
-              type="checkbox"
-              checked={filters.category?.includes(category) || false}
-              onChange={(e) => {
-                const current = new Set(filters.category || []);
-                if (e.target.checked) {
-                  current.add(category);
-                } else {
-                  current.delete(category);
-                }
-                filterIssuesByCategory(Array.from(current));
-              }}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            <CategoryTag category={category} />
-          </label>
-        ))}
+      <div className="flex flex-wrap gap-2" role="group" aria-label="カテゴリフィルター">
+        {categories.map((category) => {
+          const isChecked = filters.category?.includes(category) || false;
+          const categoryInfo = getCategoryAccessibilityInfo(category);
+          
+          return (
+            <label key={category} className="inline-flex cursor-pointer items-center gap-1 text-xs text-slate-700">
+              <input
+                type="checkbox"
+                checked={isChecked}
+                onChange={(e) => {
+                  const current = new Set(filters.category || []);
+                  if (e.target.checked) {
+                    current.add(category);
+                  } else {
+                    current.delete(category);
+                  }
+                  filterIssuesByCategory(Array.from(current));
+                }}
+                className={`rounded border-gray-300 text-blue-600 ${getFocusIndicatorClasses()}`}
+                aria-describedby={`category-${category}-description`}
+              />
+              <CategoryTag category={category} />
+              <span id={`category-${category}-description`} className="sr-only">
+                {categoryInfo.ariaLabel}でフィルター{isChecked ? '（選択中）' : ''}
+              </span>
+            </label>
+          );
+        })}
       </div>
     );
   };
@@ -136,6 +167,11 @@ export default function IssueList() {
     );
   }, [filters]);
 
+  // 問題リストの説明文を生成
+  const issueListDescription = useMemo(() => {
+    return generateIssueListDescription(issues, filters);
+  }, [issues, filters]);
+
   return (
     <div className="space-y-3">
       {/* フィルター */}
@@ -145,7 +181,8 @@ export default function IssueList() {
           {hasActiveFilters && (
             <button
               onClick={clearAllFilters}
-              className="text-xs text-blue-600 hover:text-blue-800"
+              className={`text-xs text-blue-600 hover:text-blue-800 ${getFocusIndicatorClasses()}`}
+              aria-label="すべてのフィルターをクリア"
             >
               クリア
             </button>
@@ -194,52 +231,77 @@ export default function IssueList() {
       </div>
 
       {/* 問題リスト */}
-      <div className="max-h-[400px] overflow-auto">
-        {issues.length === 0 ? (
+      <div 
+        className="max-h-[400px] overflow-auto"
+        role="region"
+        aria-label="問題リスト"
+        aria-describedby="issue-list-description"
+      >
+        <div id="issue-list-description" className="sr-only">
+          {issueListDescription}
+        </div>
+        {filteredIssues.length === 0 ? (
           <div className="py-6 text-center text-sm text-slate-500">
             {stats.total === 0 ? '問題はありません。解析を実行してください。' : 'フィルターに一致する問題がありません。'}
           </div>
         ) : (
-          <ul className="divide-y divide-slate-100">
-            {issues.map((issue) => (
-              <li
-                key={issue.id}
-                className={`cursor-pointer px-2 py-3 hover:bg-slate-50 transition-colors ${
-                  selectedIssue?.id === issue.id ? 'bg-slate-50 border-l-4 border-blue-500' : ''
-                }`}
-                onClick={() => selectIssue(issue.id)}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-slate-800 line-clamp-2">
-                      {issue.message}
+          <ul className="divide-y divide-slate-100" role="list">
+            {filteredIssues.map((issue, index) => {
+              const isSelected = selectedIssue?.id === issue.id;
+              const issueDescription = generateIssueDescription(issue);
+              
+              return (
+                <li
+                  key={issue.id}
+                  className={`cursor-pointer px-2 py-3 hover:bg-slate-50 ${getAccessibleAnimationClasses()} ${
+                    isSelected ? 'bg-slate-50 border-l-4 border-blue-500' : ''
+                  }`}
+                  onClick={() => selectIssue(issue.id)}
+                  role="listitem"
+                  tabIndex={0}
+                  aria-label={issueDescription}
+                  aria-selected={isSelected}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      selectIssue(issue.id);
+                    }
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-slate-800 line-clamp-2">
+                        {issue.message}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {issue.source === 'rule' ? 'ルール' : 'AI'} · 
+                        {issue.range.start}–{issue.range.end}
+                        {issue.ruleVersion && ` · ${issue.ruleVersion}`}
+                      </div>
                     </div>
-                    <div className="mt-1 text-xs text-slate-500">
-                      {issue.source === 'rule' ? 'ルール' : 'AI'} · 
-                      {issue.range.start}–{issue.range.end}
-                      {issue.ruleVersion && ` · ${issue.ruleVersion}`}
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <SeverityBadge severity={issue.severity} />
+                      <CategoryTag category={issue.category} />
                     </div>
                   </div>
-                  <div className="flex items-center gap-1 flex-shrink-0">
-                    <SeverityBadge severity={issue.severity} />
-                    <CategoryTag category={issue.category} />
-                  </div>
-                </div>
-                
-                {/* 提案がある場合のインジケーター */}
-                {issue.suggestions && issue.suggestions.length > 0 && (
-                  <div className="mt-2 flex items-center gap-1 text-xs text-green-600">
-                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4" />
-                    </svg>
-                    <span>{issue.suggestions.length} 件の修正案</span>
-                  </div>
-                )}
-              </li>
-            ))}
+                  
+                  {/* 提案がある場合のインジケーター */}
+                  {issue.suggestions && issue.suggestions.length > 0 && (
+                    <div className="mt-2 flex items-center gap-1 text-xs text-green-600">
+                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4" />
+                      </svg>
+                      <span>{issue.suggestions.length} 件の修正案</span>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
     </div>
   );
-}
+});
+
+export default IssueList;

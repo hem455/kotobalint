@@ -1,35 +1,87 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GeminiClient } from '@/lib/gemini-client';
-import { streamingClient } from '@/lib/streaming-client';
+import { randomUUID } from 'crypto';
+import { generateProofreadingSuggestions } from '@/lib/gemini-client';
+import { containsSecret, detectSecretType } from '@/lib/secret-guard';
+import { schemaValidator } from '@/lib/schema-validator';
 import { observabilityManager } from '@/lib/observability';
 import type { SuggestRequest, SuggestResponse, ApiResponse } from '@/types';
+import type { LlmProvider, LlmSettings, LlmModel } from '@/types/llm';
+import { AVAILABLE_MODELS, DEFAULT_LLM_SETTINGS } from '@/types/llm';
 
-// Geminiクライアントのシングルトンインスタンス
-let geminiClient: GeminiClient | null = null;
+export const runtime = "nodejs";
 
-// 接続テストの状態管理（並行性安全性のため）
-let connectionTested: boolean = false;
-let connectionTestPromise: Promise<{ success: boolean; error?: string; responseTime?: number }> | null = null;
+// ローカルLLM（Ollama/OpenAI互換）は廃止。Gemini専用。
 
 /**
- * Geminiクライアントを初期化
+ * テキストをサニタイズ（ログ用のみ）
  */
-function initializeGeminiClient(): GeminiClient {
-  if (!geminiClient) {
-    // デフォルト設定（実際のアプリケーションでは設定から読み込む）
-    geminiClient = new GeminiClient({
-      baseUrl: process.env.GEMINI_BASE_URL || 'http://localhost:11434',
-      apiKey: process.env.GEMINI_API_KEY || '',
-      timeout: parseInt(process.env.GEMINI_TIMEOUT || '10000'),
-      maxSuggestions: parseInt(process.env.GEMINI_MAX_SUGGESTIONS || '3')
-    });
+function sanitizeForLogging(text: string): string {
+  // 本番環境ではログを出力しない
+  if (process.env.NODE_ENV === 'production') {
+    return '[redacted]';
   }
   
-  return geminiClient;
+  // 開発環境では簡易サニタイズ
+  return text.replace(/[^\s\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/g, '*');
 }
 
 /**
- * POST /api/suggest - LLMによる校正提案の生成（ストリーミング対応）
+ * LLMレスポンスをIssue配列に変換
+ */
+function parseLLMResponse(response: string, originalText: string): any[] {
+  try {
+    // JSON部分を抽出
+    let jsonString = response;
+    
+    // ```json コードブロックを探す
+    const jsonBlockMatch = response.match(/```json\s*([\s\S]*?)\s*```/);
+    if (jsonBlockMatch) {
+      jsonString = jsonBlockMatch[1];
+    } else {
+      // コードブロックが見つからない場合、最初の '{' と最後の '}' を探す
+      const firstBrace = response.indexOf('{');
+      const lastBrace = response.lastIndexOf('}');
+      
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        jsonString = response.substring(firstBrace, lastBrace + 1);
+      }
+    }
+    
+    const parsed = JSON.parse(jsonString);
+    
+    if (!parsed.issues || !Array.isArray(parsed.issues)) {
+      console.warn('LLM レスポンスに issues 配列がありません');
+      return [];
+    }
+
+    return parsed.issues.map((issue: any, index: number) => ({
+      id: `llm_${issue.id || index}_${randomUUID()}`,
+      source: 'llm',
+      severity: ['info', 'warn', 'error'].includes(issue.severity) ? issue.severity : 'info',
+      category: ['style', 'grammar', 'honorific', 'consistency', 'risk'].includes(issue.category) ? issue.category : 'style',
+      message: issue.message || 'LLMによる提案',
+      range: issue.range || { start: 0, end: originalText.length },
+      suggestions: (issue.suggestions || []).map((suggestion: any) => ({
+        text: suggestion.text || suggestion,
+        rationale: suggestion.rationale || 'LLMによる提案',
+        confidence: Math.max(0, Math.min(1, suggestion.confidence || 0.5)),
+        isPreferred: suggestion.isPreferred || false
+      })),
+      metadata: {
+        llmGenerated: true,
+        confidence: issue.confidence || 0.5
+      }
+    }));
+
+  } catch (error) {
+    console.error('LLM レスポンスの解析エラー:', error);
+    console.error('レスポンス内容:', response);
+    return [];
+  }
+}
+
+/**
+ * POST /api/suggest - LLMによる校正提案の生成
  */
 export async function POST(request: NextRequest): Promise<NextResponse<ApiResponse<SuggestResponse>>> {
   const startTime = Date.now();
@@ -49,129 +101,210 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
       }, { status: 400 });
     }
 
-    if (!body.style || typeof body.style !== 'string') {
+    // 環境変数から LLM 設定を構築（デフォルトは Gemini 2.5 Flash）
+    let envProvider = (process.env.LLM_PROVIDER as LlmProvider) || 'gemini';
+    if (!(['gemini', 'ollama', 'openai_compat'] as LlmProvider[]).includes(envProvider)) {
+      envProvider = 'gemini';
+    }
+    const rawEnvModel = process.env.LLM_MODEL;
+    const defaultModel = (DEFAULT_LLM_SETTINGS[envProvider].model as LlmModel) || 'gemini-2.5-flash';
+    const envModel: LlmModel = (rawEnvModel && (AVAILABLE_MODELS[envProvider] as LlmModel[]).includes(rawEnvModel as LlmModel))
+      ? (rawEnvModel as LlmModel)
+      : defaultModel;
+    const envBaseUrl = process.env.LLM_BASE_URL || (DEFAULT_LLM_SETTINGS[envProvider].baseUrl as string) || 'https://generativelanguage.googleapis.com';
+    const envApiKey = process.env.GEMINI_API_KEY || '';
+    const envTimeoutMs = Number.parseInt(process.env.LLM_TIMEOUT_MS || '', 10);
+    const envMaxSuggestions = Number.parseInt(process.env.LLM_MAX_SUGGESTIONS || '', 10);
+    const envThinkingBudget = Number.parseInt(process.env.LLM_THINKING_BUDGET || '', 10);
+    const envEnabled = (process.env.LLM_ENABLED ?? 'true').toLowerCase() === 'true';
+
+    const settings: LlmSettings = {
+      enabled: envEnabled,
+      provider: envProvider,
+      model: envModel,
+      baseUrl: envBaseUrl,
+      apiKey: envApiKey,
+      timeoutMs: Number.isFinite(envTimeoutMs) ? envTimeoutMs : 30000,
+      maxSuggestions: Number.isFinite(envMaxSuggestions) ? envMaxSuggestions : 3,
+      thinkingBudget: Number.isFinite(envThinkingBudget) ? envThinkingBudget : 512
+    };
+
+    if (!settings.enabled) {
+      return NextResponse.json({
+        success: true,
+        data: {
+          issues: [],
+          meta: {
+            elapsedMs: Date.now() - startTime,
+            model: settings.model,
+            tokensUsed: 0
+          }
+        }
+      });
+    }
+
+    // テキストの結合
+    const fullText = body.passages.map(p => p.text).join('\n');
+    
+    // シークレット検知（送信を拒否）
+    if (containsSecret(fullText)) {
+      const secretTypes = detectSecretType(fullText);
       return NextResponse.json({
         success: false,
         error: {
-          code: 'INVALID_REQUEST',
-          message: 'コンテンツスタイルが指定されていません'
+          code: 'SECRET_DETECTED',
+          message: '入力内に機密らしき文字列が含まれます。修正して再送してください。',
+          details: `検出された機密情報: ${secretTypes.join(', ')}`
+        }
+      }, { status: 400 });
+    }
+    
+    // LLMに送るテキストは原文（ノーマスク）
+    const textForLLM = fullText;
+    
+    // ログ用サニタイズ（開発環境のみ）
+    if (process.env.NODE_ENV !== 'production') {
+      console.log("Original text:", fullText);
+      console.log("Sanitized for log:", sanitizeForLogging(fullText));
+    }
+
+    // プロンプトインジェクション対策（テンプレート埋め込み前にエスケープ）
+    const sanitizedTextForPrompt = textForLLM
+      .replace(/\\/g, "\\\\")
+      .replace(/`/g, "\\`")
+      .replace(/\$/g, "\\$");
+
+    // プロンプトの構築
+    const prompt = `あなたは日本語の校正専門家です。以下のテキストを校正し、改善提案を行ってください。
+
+テキスト:
+${sanitizedTextForPrompt}
+
+以下の形式でJSONレスポンスを返してください:
+{
+  "issues": [
+    {
+      "id": "unique_id",
+      "severity": "info|warn|error",
+      "category": "style|grammar|honorific|consistency|risk",
+      "message": "問題の説明",
+      "range": {"start": 0, "end": 10},
+      "suggestions": [
+        {
+          "text": "修正案",
+          "rationale": "修正理由",
+          "confidence": 0.8
+        }
+      ]
+    }
+  ]
+}
+
+注意事項:
+- 断定的でない表現を使用してください（「〜かもしれません」「〜を検討してください」など）
+- 最大${settings.maxSuggestions || 3}個の提案まで生成してください
+- 各提案には信頼度（confidence）を含めてください
+- 問題の範囲（range）は元のテキスト内の文字位置で指定してください
+- 重要度は適切に設定してください（info: 軽微、warn: 注意、error: 重要）`;
+
+    // 設定のバリデーション
+    if (!settings.provider || !settings.model) {
+      return NextResponse.json({
+        success: false,
+        error: {
+          code: 'INVALID_SETTINGS',
+          message: 'LLM設定が不完全です'
         }
       }, { status: 400 });
     }
 
-    // テキスト抜粋の検証
-    for (const passage of body.passages) {
-      if (!passage.text || typeof passage.text !== 'string') {
-        return NextResponse.json({
-          success: false,
-          error: {
-            code: 'INVALID_REQUEST',
-            message: '無効なテキスト抜粋が含まれています'
-          }
-        }, { status: 400 });
-      }
-
-      if (!passage.range || typeof passage.range.start !== 'number' || typeof passage.range.end !== 'number') {
-        return NextResponse.json({
-          success: false,
-          error: {
-            code: 'INVALID_REQUEST',
-            message: '無効なテキスト範囲が含まれています'
-          }
-        }, { status: 400 });
-      }
-
-      // テキスト範囲の境界値検証
-      if (passage.range.start < 0 || 
-          passage.range.start > passage.range.end || 
-          passage.range.end > passage.text.length) {
-        return NextResponse.json({
-          success: false,
-          error: {
-            code: 'INVALID_REQUEST',
-            message: '無効なテキスト範囲が含まれています'
-          }
-        }, { status: 400 });
-      }
+    // プロバイダーはGemini固定
+    if (settings.provider !== 'gemini') {
+      settings.provider = 'gemini' as any;
+      settings.model = (settings.model || 'gemini-2.5-flash') as any;
     }
 
-    // 文字数制限チェック（合計1000文字）
-    const totalTextLength = body.passages.reduce((sum, passage) => sum + passage.text.length, 0);
-    if (totalTextLength > 1000) {
+    // プロバイダー別の処理（Geminiのみ）
+    let issues: any[] = [];
+
+    // Gemini 2.5 Flashによる構造化出力
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug("Gemini API Key available:", Boolean(settings.apiKey));
+      console.debug("Environment GEMINI_API_KEY available:", Boolean(process.env.GEMINI_API_KEY));
+    }
+
+    const apiKey = settings.apiKey || process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("No Gemini API key configured");
+    }
+
+    const geminiResult = await generateProofreadingSuggestions({
+      apiKey,
+      model: settings.model,
+      text: textForLLM,
+      timeoutMs: settings.timeoutMs,
+      thinkingBudget: settings.thinkingBudget
+    });
+
+    if (!geminiResult.success) {
       return NextResponse.json({
         success: false,
         error: {
-          code: 'TEXT_TOO_LONG',
-          message: 'テキスト抜粋が長すぎます（最大1000文字）'
-        }
-      }, { status: 400 });
-    }
-
-    // Geminiクライアントの初期化
-    const client = initializeGeminiClient();
-    
-    // 接続テスト（並行性安全性を考慮）
-    if (!connectionTested) {
-      if (!connectionTestPromise) {
-        connectionTestPromise = client.testConnection();
-      }
-      
-      try {
-        const connectionTest = await connectionTestPromise;
-        if (!connectionTest.success) {
-          // 失敗時はPromiseをリセット
-          connectionTestPromise = null;
-          return NextResponse.json({
-            success: false,
-            error: {
-              code: 'LLM_UNAVAILABLE',
-              message: 'LLMサービスが利用できません',
-              details: connectionTest.error
-            }
-          }, { status: 503 });
-        }
-        connectionTested = true;
-      } catch (error) {
-        // エラー時はPromiseをリセット
-        connectionTestPromise = null;
-        return NextResponse.json({
-          success: false,
-          error: {
-            code: 'LLM_UNAVAILABLE',
-            message: 'LLMサービスが利用できません',
-            details: error instanceof Error ? error.message : '不明なエラー'
-          }
-        }, { status: 503 });
-      }
-    }
-
-    // 校正提案の生成
-    const result = await client.generateSuggestions(body);
-    
-    if (!result.success) {
-      return NextResponse.json({
-        success: false,
-        error: {
-          code: 'LLM_ERROR',
-          message: 'LLMによる提案生成に失敗しました',
-          details: result.error
+          code: 'LLM_GENERATION_FAILED',
+          message: 'Geminiによる提案生成に失敗しました',
+          details: geminiResult.error
         }
       }, { status: 500 });
     }
 
-    // レスポンスの構築
-    const response: SuggestResponse = {
-      issues: result.issues || [],
-      meta: {
-        elapsedMs: result.elapsedMs || (Date.now() - startTime),
-        model: 'gemini-2.0-flash-exp',
-        tokensUsed: Math.ceil(totalTextLength / 4) // 概算
-      }
-    };
+    issues = geminiResult.issues || [];
+
+    // スキーマ検証
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug('Issues before validation:', JSON.stringify(issues, null, 2));
+    }
+    
+    const validationResult = schemaValidator.validateLLMResponse({ issues });
+    if (!validationResult.isValid) {
+      console.warn('LLM レスポンスのスキーマ検証に失敗:', validationResult.errors);
+      console.warn('Validation details:', {
+        issuesCount: issues.length,
+        firstIssue: issues[0],
+        validationErrors: validationResult.errors
+      });
+      
+      // フォールバック応答を使用
+      const fallbackResponse = schemaValidator.generateSafeFallback();
+      return NextResponse.json({
+        success: true,
+        data: {
+          issues: fallbackResponse.issues,
+          meta: {
+            elapsedMs: Date.now() - startTime,
+            model: settings.model,
+            tokensUsed: Math.ceil(textForLLM.length / 4)
+          }
+        }
+      });
+    }
+
+    // 成功を記録
+    observabilityManager.recordSuccess(
+      textForLLM,
+      issues,
+      Date.now() - startTime
+    );
 
     return NextResponse.json({
       success: true,
-      data: response
+      data: {
+        issues,
+        meta: {
+          elapsedMs: Date.now() - startTime,
+          model: settings.model,
+          tokensUsed: Math.ceil(textForLLM.length / 4)
+        }
+      }
     });
 
   } catch (error) {
@@ -181,47 +314,9 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
       success: false,
       error: {
         code: 'INTERNAL_ERROR',
-        message: '内部サーバーエラーが発生しました',
+        message: 'LLMによる提案生成に失敗しました',
         details: error instanceof Error ? error.message : '不明なエラー'
       }
     }, { status: 500 });
-  }
-}
-
-/**
- * GET /api/suggest - ヘルスチェック
- */
-export async function GET(): Promise<NextResponse<ApiResponse<{
-  status: string;
-  llmAvailable: boolean;
-  model: string;
-  responseTime?: number;
-  metrics?: any;
-}>>> {
-  try {
-    const client = initializeGeminiClient();
-    const connectionTest = await client.testConnection();
-    const healthStatus = observabilityManager.getHealthStatus();
-    
-    const statusCode = connectionTest.success ? 200 : 503;
-    
-    return NextResponse.json({
-      success: true,
-      data: {
-        status: connectionTest.success ? 'healthy' : 'unhealthy',
-        llmAvailable: connectionTest.success,
-        model: 'gemini-2.0-flash-exp',
-        responseTime: connectionTest.responseTime,
-        metrics: healthStatus.metrics
-      }
-    }, { status: statusCode });
-  } catch (error) {
-    return NextResponse.json({
-      success: false,
-      error: {
-        code: 'SERVICE_UNAVAILABLE',
-        message: 'LLMサービスが利用できません'
-      }
-    }, { status: 503 });
   }
 }

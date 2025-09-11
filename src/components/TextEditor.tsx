@@ -2,6 +2,8 @@
 
 import React, { useRef, useEffect, useMemo, useState, useCallback } from 'react';
 import { useTextEditor, useIssues, useSelectedIssue } from '@/lib/hooks';
+import { getFocusIndicatorClasses, getAccessibleAnimationClasses } from '@/lib/accessibility-utils';
+import { useDebouncedAnalysis } from '@/lib/performance-utils';
 
 /**
  * テキストエディターコンポーネント
@@ -13,11 +15,20 @@ export default function TextEditor() {
     selectedRange,
     isAnalyzing,
     updateText,
-    selectTextRange
+    selectTextRange,
+    analyzeText
   } = useTextEditor();
 
   // updateTextをメモ化して安定化
   const memoizedUpdateText = useCallback(updateText, []);
+  
+  // デバウンス解析を設定（自動解析が有効な場合のみ）
+  const debouncedAnalyze = useDebouncedAnalysis(
+    text,
+    analyzeText,
+    500, // 500ms遅延
+    true // 自動解析有効
+  );
 
   // 初期テキストを設定（デモ用）
   useEffect(() => {
@@ -125,6 +136,8 @@ export default function TextEditor() {
   // テキスト変更ハンドラー
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     updateText(e.target.value);
+    // デバウンス解析を実行
+    debouncedAnalyze();
   };
 
   // テキスト選択ハンドラー
@@ -167,21 +180,22 @@ export default function TextEditor() {
               type="checkbox"
               checked={showLineNumbers}
               onChange={toggleLineNumbers}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              className={`rounded border-gray-300 text-blue-600 ${getFocusIndicatorClasses()}`}
+              aria-describedby="line-numbers-description"
             />
-            <span>行番号</span>
+            <span id="line-numbers-description">行番号</span>
           </label>
         </div>
-        <div className="text-xs text-slate-500">
+        <div className="text-xs text-slate-500" role="status" aria-live="polite">
           {text.length} 文字
         </div>
       </div>
 
       {/* エディターコンテナ */}
-      <div className="relative h-[460px] overflow-auto rounded-xl border bg-white">
+      <div className="relative h-[460px] overflow-auto rounded-xl border bg-white" role="textbox" aria-label="テキストエディター">
         {/* 行番号 */}
         {showLineNumbers && (
-          <div className="absolute left-0 top-0 z-10 h-full w-12 bg-slate-50 border-r border-slate-200">
+          <div className="absolute left-0 top-0 z-10 h-full w-12 bg-slate-50 border-r border-slate-200" aria-hidden="true">
             <div className="p-4 font-mono text-xs text-slate-500 leading-6">
               {lineNumbers.map(num => (
                 <div key={num} className="h-6 text-right">
@@ -210,17 +224,22 @@ export default function TextEditor() {
           onChange={handleTextChange}
           onSelect={handleTextSelect}
           onScroll={syncScroll}
-          className={`absolute inset-0 resize-none bg-transparent p-4 font-mono text-sm leading-6 caret-slate-900 text-slate-900 selection:bg-slate-200 focus:outline-none ${
+          className={`absolute inset-0 resize-none bg-transparent p-4 font-mono text-sm leading-6 caret-slate-900 text-slate-900 selection:bg-slate-200 ${getFocusIndicatorClasses()} ${
             showLineNumbers ? 'pl-16' : ''
           }`}
           spellCheck={false}
           placeholder="ここにテキストを入力してください..."
+          aria-label="テキストエディター"
+          aria-describedby="text-editor-description"
         />
+        <div id="text-editor-description" className="sr-only">
+          テキストを入力してください。問題がある箇所は色付きの下線で表示されます。
+        </div>
       </div>
 
       {/* 選択範囲の情報 */}
       {selectedRange && (
-        <div className="mt-2 text-xs text-slate-500">
+        <div className="mt-2 text-xs text-slate-500" role="status" aria-live="polite">
           選択範囲: {selectedRange.start} - {selectedRange.end} 
           ({selectedRange.end - selectedRange.start} 文字)
         </div>

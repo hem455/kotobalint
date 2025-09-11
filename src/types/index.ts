@@ -1,4 +1,5 @@
 // Core Data Models
+import type { LlmSettings } from './llm';
 export interface Issue {
   id: string;
   source: IssueSource;
@@ -99,13 +100,7 @@ export interface AppSettings {
     disabledRules: string[];
     severityOverrides: Record<string, 'info' | 'warn' | 'error'>;
   };
-  llm: {
-    enabled: boolean;
-    baseUrl: string;
-    apiKey: string;
-    timeout: number;
-    maxSuggestions: number;
-  };
+  llm: LlmSettings;
   ui: {
     theme: 'light' | 'dark';
     fontSize: 'small' | 'medium' | 'large';

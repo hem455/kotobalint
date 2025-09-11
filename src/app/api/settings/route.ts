@@ -1,6 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { AppSettings, ApiResponse } from '@/types';
 
+// GEMINI_API_KEY の起動時バリデーション
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim();
+const IS_GEMINI_KEY_MISSING = !GEMINI_API_KEY;
+if (IS_GEMINI_KEY_MISSING) {
+  console.error('[Startup] GEMINI_API_KEY が未設定です。Gemini プロバイダーを利用するには環境変数 GEMINI_API_KEY を設定してください。');
+}
+
+// 検証定数
+const MAX_SENTENCE_LENGTH_MIN = 50;
+const MAX_SENTENCE_LENGTH_MAX = 10000;
+
 /**
  * APIキーをマスクするユーティリティ関数
  */
@@ -35,7 +46,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   analysis: {
     trigger: 'manual',
     autoDelay: 500,
-    maxSentenceLength: 200
+    maxSentenceLength: 10000
   },
   rules: {
     activeRuleset: 'japanese-standard',
@@ -43,11 +54,14 @@ const DEFAULT_SETTINGS: AppSettings = {
     severityOverrides: {}
   },
   llm: {
-    enabled: false,
-    baseUrl: 'http://localhost:11434',
-    apiKey: '',
-    timeout: 10000,
-    maxSuggestions: 3
+    enabled: true,
+    provider: 'gemini',
+    model: 'gemini-2.5-flash',
+    baseUrl: 'https://generativelanguage.googleapis.com',
+    apiKey: GEMINI_API_KEY,
+    timeoutMs: 30000,
+    maxSuggestions: 3,
+    thinkingBudget: 512
   },
   ui: {
     theme: 'light',
@@ -56,7 +70,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     fontFamily: 'monospace'
   },
   privacy: {
-    allowExternalRequests: false,
+    allowExternalRequests: true,
     logAnalytics: false
   }
 };
@@ -69,6 +83,19 @@ export async function GET(): Promise<NextResponse<ApiResponse<AppSettings>>> {
     // 実際のアプリケーションでは、ここでデータベースやファイルから設定を読み込む
     // 今回はデフォルト設定を返す
     const settings = { ...DEFAULT_SETTINGS };
+
+    // Gemini が有効で API キーが未設定の場合は 500 を返して明示
+    if (settings.llm.enabled && settings.llm.provider === 'gemini' && IS_GEMINI_KEY_MISSING) {
+      console.error('[Settings GET] 環境変数 GEMINI_API_KEY が未設定のため、Gemini を利用できません。');
+      return NextResponse.json({
+        success: false,
+        error: {
+          code: 'MISSING_GEMINI_API_KEY',
+          message: '環境変数 GEMINI_API_KEY が未設定です。サーバー環境に設定してください。',
+          details: 'Gemini プロバイダーを有効化するには GEMINI_API_KEY が必要です。'
+        }
+      }, { status: 500 });
+    }
     
     // APIキーをマスクした安全な設定を返す
     const safeSettings = createSafeSettings(settings);
@@ -141,6 +168,19 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
       }
     };
 
+    // 保存時も Gemini が有効かつキー未設定なら受け付けない
+    if (settings.llm.enabled && settings.llm.provider === 'gemini' && IS_GEMINI_KEY_MISSING) {
+      console.error('[Settings POST] 環境変数 GEMINI_API_KEY が未設定のため、Gemini を利用できません。');
+      return NextResponse.json({
+        success: false,
+        error: {
+          code: 'MISSING_GEMINI_API_KEY',
+          message: '環境変数 GEMINI_API_KEY が未設定です。サーバー環境に設定してください。',
+          details: 'Gemini プロバイダーを有効化するには GEMINI_API_KEY が必要です。'
+        }
+      }, { status: 500 });
+    }
+
     // 実際のアプリケーションでは、ここでデータベースやファイルに設定を保存
     // 今回は成功レスポンスのみ返す
     
@@ -187,8 +227,12 @@ function validateSettings(settings: Partial<AppSettings>): {
     if (settings.analysis.autoDelay !== undefined && (settings.analysis.autoDelay < 100 || settings.analysis.autoDelay > 5000)) {
       errors.push('analysis.autoDelay は 100-5000 の範囲である必要があります');
     }
-    if (settings.analysis.maxSentenceLength !== undefined && (settings.analysis.maxSentenceLength < 50 || settings.analysis.maxSentenceLength > 1000)) {
-      errors.push('analysis.maxSentenceLength は 50-1000 の範囲である必要があります');
+    if (settings.analysis.maxSentenceLength !== undefined) {
+      if (typeof settings.analysis.maxSentenceLength !== 'number' || !Number.isFinite(settings.analysis.maxSentenceLength) || !Number.isInteger(settings.analysis.maxSentenceLength)) {
+        errors.push('analysis.maxSentenceLength は整数である必要があります');
+      } else if (settings.analysis.maxSentenceLength < MAX_SENTENCE_LENGTH_MIN || settings.analysis.maxSentenceLength > MAX_SENTENCE_LENGTH_MAX) {
+        errors.push(`analysis.maxSentenceLength は ${MAX_SENTENCE_LENGTH_MIN}-${MAX_SENTENCE_LENGTH_MAX} の範囲である必要があります`);
+      }
     }
   }
 
@@ -229,8 +273,8 @@ function validateSettings(settings: Partial<AppSettings>): {
       errors.push('llm.apiKey は文字列である必要があります');
     }
     
-    if (settings.llm.timeout !== undefined && (settings.llm.timeout < 1000 || settings.llm.timeout > 60000)) {
-      errors.push('llm.timeout は 1000-60000 の範囲である必要があります');
+    if (settings.llm.timeoutMs !== undefined && (settings.llm.timeoutMs < 1000 || settings.llm.timeoutMs > 120000)) {
+      errors.push('llm.timeoutMs は 1000-120000 の範囲である必要があります');
     }
     if (settings.llm.maxSuggestions !== undefined && (settings.llm.maxSuggestions < 1 || settings.llm.maxSuggestions > 10)) {
       errors.push('llm.maxSuggestions は 1-10 の範囲である必要があります');

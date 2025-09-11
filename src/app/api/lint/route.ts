@@ -51,6 +51,7 @@ async function initializeRuleManager(): Promise<RuleManager> {
       if (!result.success) {
         const errorMessage = `ルールファイルの読み込みに失敗しました: ${ruleFilePath}`;
         console.error(errorMessage, result.errors);
+        ruleManager = null;
         throw new Error(`${errorMessage} - ${result.errors?.join(', ')}`);
       }
       
@@ -59,6 +60,7 @@ async function initializeRuleManager(): Promise<RuleManager> {
     } catch (error) {
       const errorMessage = 'ルールファイルの初期化に失敗しました';
       console.error(errorMessage, error);
+      ruleManager = null;
       throw new Error(`${errorMessage} - ${error instanceof Error ? error.message : '不明なエラー'}`);
     }
   }

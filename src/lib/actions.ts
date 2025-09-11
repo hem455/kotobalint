@@ -16,13 +16,16 @@ export const useAnalysisActions = () => {
   } = useAppStore();
 
   const analyzeText = async (textToAnalyze?: string) => {
+    console.log('analyzeText関数が呼び出されました');
     const targetText = textToAnalyze || text;
     
     if (!targetText.trim()) {
+      console.log('テキストが空です');
       setError('解析するテキストがありません');
       return;
     }
 
+    console.log('解析を開始します:', targetText);
     setAnalyzing(true);
     clearError();
 
@@ -196,12 +199,22 @@ export const useSettingsActions = () => {
   };
 
   const updatePrivacySettings = (privacySettings: Partial<typeof settings.privacy>) => {
-    updateSettings({
+    const newSettings: Partial<typeof settings> = {
       privacy: {
         ...settings.privacy,
         ...privacySettings
       }
-    });
+    };
+
+    // 外部リクエストが無効化された場合、LLMも無効化する
+    if (privacySettings.allowExternalRequests === false) {
+      newSettings.llm = {
+        ...settings.llm,
+        enabled: false
+      };
+    }
+
+    updateSettings(newSettings);
   };
 
   return {

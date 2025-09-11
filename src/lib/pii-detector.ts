@@ -24,10 +24,10 @@ export class PIIDetector {
   private patterns: Map<string, RegExp> = new Map();
   private replacementMap: Map<string, string> = new Map();
   private compiledPatterns: Map<string, RegExp> = new Map();
-  private config: any;
+  private config: { debug: boolean };
 
-  constructor(config?: any) {
-    this.config = config;
+  constructor(config?: Partial<{ debug: boolean }>) {
+    this.config = { debug: false, ...(config || {}) };
     this.initializePatterns();
   }
 
@@ -80,12 +80,12 @@ export class PIIDetector {
    * テキストからPIIを検出し、マスクする
    */
   detectAndMask(text: string): MaskedText {
+    // 入力の生データはログに出さない
     const piiMatches: PIIMatch[] = [];
     let maskedText = text;
-    let offset = 0;
 
     // 各パターンで検出
-    for (const [type, pattern] of this.patterns) {
+    Array.from(this.patterns.entries()).forEach(([type, pattern]) => {
       const matches = Array.from(text.matchAll(pattern));
       
       for (const match of matches) {
@@ -102,7 +102,7 @@ export class PIIDetector {
           end: match.index + value.length
         });
       }
-    }
+    });
 
     // 重複を除去し、位置順にソート
     const uniqueMatches = this.removeOverlappingMatches(piiMatches);
@@ -116,6 +116,11 @@ export class PIIDetector {
                    maskedText.substring(match.end);
     }
 
+    if (this.config.debug) {
+      console.debug("[PII] masked output:", maskedText);
+      console.debug("[PII] matches:", uniqueMatches.map(m => ({ ...m, value: undefined })));
+    }
+    
     return {
       originalText: text,
       maskedText,
@@ -171,7 +176,7 @@ export class PIIDetector {
    * テキストにPIIが含まれているかチェック
    */
   hasPII(text: string): boolean {
-    for (const pattern of this.patterns.values()) {
+    for (const pattern of Array.from(this.patterns.values())) {
       if (pattern.test(text)) {
         return true;
       }

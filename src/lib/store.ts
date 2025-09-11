@@ -101,7 +101,7 @@ const defaultSettings: AppSettings = {
   analysis: {
     trigger: 'manual',
     autoDelay: 500,
-    maxSentenceLength: 200
+    maxSentenceLength: 10000
   },
   rules: {
     activeRuleset: 'japanese-standard',
@@ -109,10 +109,12 @@ const defaultSettings: AppSettings = {
     severityOverrides: {}
   },
   llm: {
-    enabled: false,
-    baseUrl: 'http://localhost:11434',
+    enabled: true,
+    provider: 'gemini',
+    model: 'gemini-2.5-flash',
+    baseUrl: 'https://generativelanguage.googleapis.com',
     apiKey: '',
-    timeout: 10000,
+    timeoutMs: 30000,
     maxSuggestions: 3
   },
   ui: {

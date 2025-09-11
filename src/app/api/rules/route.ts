@@ -17,12 +17,17 @@ async function initializeRuleManager(): Promise<RuleManager> {
       const result = await ruleManager.loadRuleFile('src/rules/japanese-standard-rules.yaml', 'japanese-standard');
       if (!result.success) {
         console.warn('デフォルトルールファイルの読み込みに失敗:', result.errors);
+        ruleManager = null;
       }
     } catch (error) {
       console.warn('ルールファイルの読み込みエラー:', error);
+      ruleManager = null;
     }
   }
   
+  if (!ruleManager) {
+    throw new Error('ルールマネージャーの初期化に失敗しました');
+  }
   return ruleManager;
 }
 

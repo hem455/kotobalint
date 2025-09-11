@@ -19,6 +19,16 @@ export interface SchemaValidationConfig {
   allowedCategories: string[];
   maxTextLength: number;
   maxSuggestionLength: number;
+  /** 追加: デバッグ出力を有効化 */
+  debug?: boolean;
+  /** 追加: ロガー（debug/info/warn/error/log のいずれかを持つオブジェクト） */
+  logger?: {
+    debug?: (...args: any[]) => void;
+    info?: (...args: any[]) => void;
+    warn?: (...args: any[]) => void;
+    error?: (...args: any[]) => void;
+    log?: (...args: any[]) => void;
+  };
 }
 
 /**
@@ -28,6 +38,19 @@ export class SchemaValidator {
   private config: SchemaValidationConfig;
 
   constructor(config?: Partial<SchemaValidationConfig>) {
+    const noop = () => {};
+    const defaultLogger = {
+      debug: noop,
+      info: noop,
+      warn: noop,
+      error: noop,
+      log: noop
+    };
+    const incomingLogger = config?.logger;
+    const safeLogger = (incomingLogger && (typeof incomingLogger === 'object'))
+      ? incomingLogger
+      : defaultLogger;
+
     this.config = {
       maxIssues: 10,
       maxSuggestionsPerIssue: 3,
@@ -35,8 +58,37 @@ export class SchemaValidator {
       allowedCategories: ['style', 'grammar', 'honorific', 'consistency', 'risk'],
       maxTextLength: 1000,
       maxSuggestionLength: 200,
-      ...config
+      debug: false,
+      ...config,
+      // logger は常に安全なものを優先
+      logger: (config?.logger && typeof config.logger === 'object') ? config.logger : safeLogger
     };
+  }
+
+  // 追加: デバッグ用の内部ロガー
+  private logDebug = (...args: any[]): void => {
+    if (!this.config?.debug) return;
+    const logger = this.config?.logger || console;
+    const fn = (typeof logger.debug === 'function') ? logger.debug
+      : (typeof logger.log === 'function') ? logger.log
+      : null;
+    if (!fn) return;
+    try {
+      fn.apply(logger, args as any);
+    } catch (_) {
+      // 予期せぬシリアライズエラー等は握りつぶす（本番での安全性優先）
+    }
+  };
+
+  // 追加: Issueのログ用レダクション
+  private redactIssue(input: any): { id?: any; severity?: any; category?: any; range?: any; message?: string } {
+    const id = input?.id;
+    const severity = input?.severity;
+    const category = input?.category;
+    const range = input?.range;
+    const originalMessage: string = typeof input?.message === 'string' ? input.message : '';
+    const truncated = originalMessage.length > 200 ? (originalMessage.slice(0, 200) + '…') : originalMessage;
+    return { id, severity, category, range, message: truncated };
   }
 
   /**
@@ -94,6 +146,9 @@ export class SchemaValidator {
     const errors: string[] = [];
     const warnings: string[] = [];
 
+    // デバッグログ（レダクト済み）
+    this.logDebug(`Validating issue ${index}:`, this.redactIssue(issueData));
+
     // 必須フィールドのチェック
     if (!issueData.id || typeof issueData.id !== 'string') {
       errors.push('idが必須です');
@@ -105,6 +160,7 @@ export class SchemaValidator {
 
     if (!issueData.range || typeof issueData.range !== 'object') {
       errors.push('rangeが必須です');
+      this.logDebug('Range validation failed:', this.redactIssue({ ...issueData, range: issueData.range }));
     }
 
     // メッセージの長さチェック
@@ -163,7 +219,7 @@ export class SchemaValidator {
       suggestions: issueData.suggestions || [],
       metadata: {
         llmGenerated: true,
-        confidence: Math.max(0, Math.min(1, issueData.confidence || 0.5))
+        confidence: Math.max(0, Math.min(1, (issueData.confidence ?? 0.5)))
       }
     };
 
@@ -211,7 +267,7 @@ export class SchemaValidator {
     const sanitizedData: Suggestion = {
       text: this.sanitizeString(suggestionData.text) || '',
       rationale: this.sanitizeString(suggestionData.rationale) || 'LLMによる提案',
-      confidence: Math.max(0, Math.min(1, suggestionData.confidence || 0.5)),
+      confidence: Math.max(0, Math.min(1, (suggestionData.confidence ?? 0.5))),
       isPreferred: Boolean(suggestionData.isPreferred)
     };
 
