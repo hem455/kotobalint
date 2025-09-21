@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useMemo, useState } from 'react';
 import { useTextEditor, useIssues, useSelectedIssue } from '@/lib/hooks';
 import { getFocusIndicatorClasses, getAccessibleAnimationClasses } from '@/lib/accessibility-utils';
 import { useDebouncedAnalysis } from '@/lib/performance-utils';
@@ -19,9 +19,6 @@ export default function TextEditor() {
     analyzeText
   } = useTextEditor();
 
-  // updateTextをメモ化して安定化
-  const memoizedUpdateText = useCallback(updateText, []);
-  
   // デバウンス解析を設定（自動解析が有効な場合のみ）
   const debouncedAnalyze = useDebouncedAnalysis(
     text,
@@ -34,9 +31,9 @@ export default function TextEditor() {
   useEffect(() => {
     if (!text || text.trim() === '') {
       const initialText = "これはテスト用の文章です。コンピュータとコンピューターの表記ゆれがあります。また、ら抜き言葉の「食べれる」も含まれています。";
-      memoizedUpdateText(initialText);
+      updateText(initialText);
     }
-  }, [memoizedUpdateText, text]);
+  }, [updateText, text]);
 
   const { issues, filters } = useIssues();
   const { issue: selectedIssue } = useSelectedIssue();
@@ -210,7 +207,7 @@ export default function TextEditor() {
         <div
           ref={overlayRef}
           aria-hidden
-          className={`pointer-events-none absolute inset-0 whitespace-pre-wrap break-words p-4 font-mono text-sm leading-6 text-slate-900 ${
+          className={`pointer-events-none absolute inset-0 whitespace-pre-wrap break-words p-4 font-mono text-sm leading-6 text-transparent ${
             showLineNumbers ? 'pl-16' : ''
           }`}
           dangerouslySetInnerHTML={{ __html: highlightedHTML }}

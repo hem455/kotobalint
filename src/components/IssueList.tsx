@@ -169,8 +169,8 @@ const IssueList = memo(function IssueList() {
 
   // 問題リストの説明文を生成
   const issueListDescription = useMemo(() => {
-    return generateIssueListDescription(issues, filters);
-  }, [issues, filters]);
+    return generateIssueListDescription(filteredIssues, filters);
+  }, [filteredIssues, filters]);
 
   return (
     <div className="space-y-3">
@@ -217,7 +217,7 @@ const IssueList = memo(function IssueList() {
           </div>
           <div>
             <span className="text-slate-500">表示:</span>
-            <span className="ml-1 font-medium text-slate-800">{issues.length}</span>
+            <span className="ml-1 font-medium text-slate-800">{filteredIssues.length}</span>
           </div>
           <div>
             <span className="text-slate-500">エラー:</span>
@@ -257,10 +257,9 @@ const IssueList = memo(function IssueList() {
                     isSelected ? 'bg-slate-50 border-l-4 border-blue-500' : ''
                   }`}
                   onClick={() => selectIssue(issue.id)}
-                  role="listitem"
                   tabIndex={0}
                   aria-label={issueDescription}
-                  aria-selected={isSelected}
+                  aria-current={isSelected ? 'true' : undefined}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();

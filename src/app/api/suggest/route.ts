@@ -145,6 +145,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
 
     // テキストの結合
     const fullText = body.passages.map(p => p.text).join('\n');
+    const maskedForLogs = sanitizeForLogging(fullText);
     
     // シークレット検知（送信を拒否）
     if (containsSecret(fullText)) {
@@ -164,8 +165,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
     
     // ログ用サニタイズ（開発環境のみ）
     if (process.env.NODE_ENV !== 'production') {
-      console.log("Original text:", fullText);
-      console.log("Sanitized for log:", sanitizeForLogging(fullText));
+      console.log("Sanitized input (masked):", maskedForLogs);
     }
 
     // プロンプトインジェクション対策（テンプレート埋め込み前にエスケープ）
@@ -238,6 +238,8 @@ ${sanitizedTextForPrompt}
       throw new Error("No Gemini API key configured");
     }
 
+    console.log('Gemini API呼び出し開始:', { model: settings.model, textLength: textForLLM.length });
+    
     const geminiResult = await generateProofreadingSuggestions({
       apiKey,
       model: settings.model,
@@ -245,6 +247,8 @@ ${sanitizedTextForPrompt}
       timeoutMs: settings.timeoutMs,
       thinkingBudget: settings.thinkingBudget
     });
+    
+    console.log('Gemini API呼び出し完了:', { success: geminiResult.success, issuesCount: geminiResult.issues?.length || 0 });
 
     if (!geminiResult.success) {
       return NextResponse.json({
@@ -289,16 +293,18 @@ ${sanitizedTextForPrompt}
     }
 
     // 成功を記録
+    const normalizedIssues = validationResult.sanitizedData?.issues ?? issues;
+
     observabilityManager.recordSuccess(
-      textForLLM,
-      issues,
+      maskedForLogs,
+      normalizedIssues,
       Date.now() - startTime
     );
 
     return NextResponse.json({
       success: true,
       data: {
-        issues,
+        issues: normalizedIssues,
         meta: {
           elapsedMs: Date.now() - startTime,
           model: settings.model,
@@ -309,7 +315,7 @@ ${sanitizedTextForPrompt}
 
   } catch (error) {
     console.error('Suggest API エラー:', error);
-    
+
     return NextResponse.json({
       success: false,
       error: {

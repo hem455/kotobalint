@@ -50,6 +50,27 @@ interface AppState {
   maxHistorySize: number;
 }
 
+type AutoFixAppliedEntry = {
+  issueId: string;
+  originalText: string;
+  appliedText: string;
+  range: { start: number; end: number };
+};
+
+type AutoFixFailureEntry = {
+  issueId: string;
+  error: string;
+};
+
+interface AutoFixSummary {
+  success: boolean;
+  appliedCount: number;
+  failedCount: number;
+  appliedFixes: AutoFixAppliedEntry[];
+  failedFixes: AutoFixFailureEntry[];
+  message: string;
+}
+
 // アクションインターフェース
 interface AppActions {
   // テキスト関連アクション
@@ -83,7 +104,8 @@ interface AppActions {
   clearError: () => void;
   
   // 一括操作
-  applyAllAutoFixes: () => void;
+  applyAllAutoFixes: () => AutoFixSummary;
+  isSafeFix: (issue: Issue, suggestion: any) => boolean;
   
   // 履歴管理アクション
   saveToHistory: (action: string, description?: string) => void;
@@ -139,57 +161,89 @@ const defaultFilters: IssueFilters = {
 // メインストア
 export const useAppStore = create<AppState & AppActions>()(
   persist(
-    (set, get) => ({
-      // 初期状態
-      text: '',
-      selectedTextRange: null,
-      issues: [],
-      selectedIssueId: null,
-      issueFilters: defaultFilters,
-      issueStats: {
-        total: 0,
-        bySource: {},
-        bySeverity: {},
-        byCategory: {}
-      },
-      settings: defaultSettings,
-      isAnalyzing: false,
-      isSettingsOpen: false,
-      activeTab: 'text',
-      error: null,
-      history: [],
-      historyIndex: -1,
-      maxHistorySize: 50,
-
-      // テキスト関連アクション
-      setText: (text: string) => {
+    (set, get) => {
+      // 現在のテキストを使って issue に元テキストを埋め込む
+      const augmentIssuesWithContext = (incoming: Issue[]): Issue[] => {
         const currentText = get().text;
-        set({ text });
-        // テキストが変更されたら選択範囲をクリア
-        if (get().selectedTextRange) {
-          set({ selectedTextRange: null });
-        }
-        // 統計情報を更新
-        get().updateIssueStats();
-        // テキストが実際に変更された場合のみ履歴に保存
-        if (currentText !== text) {
-          get().saveToHistory('edit', 'テキストを編集');
-        }
-      },
 
-      setSelectedTextRange: (range: TextRange | null) => {
-        set({ selectedTextRange: range });
-      },
+        return incoming.map(issue => {
+          const { range } = issue;
+          let originalText: string | undefined;
 
-      // 問題関連アクション
-      setIssues: (issues: Issue[]) => {
-        set({ issues });
-        get().updateIssueStats();
-      },
+          if (
+            range &&
+            typeof range.start === 'number' &&
+            typeof range.end === 'number' &&
+            range.start >= 0 &&
+            range.end <= currentText.length &&
+            range.start < range.end
+          ) {
+            originalText = currentText.slice(range.start, range.end);
+          }
+
+          return {
+            ...issue,
+            metadata: {
+              ...issue.metadata,
+              originalText
+            }
+          };
+        });
+      };
+
+      return {
+        // 初期状態
+        text: '',
+        selectedTextRange: null,
+        issues: [],
+        selectedIssueId: null,
+        issueFilters: defaultFilters,
+        issueStats: {
+          total: 0,
+          bySource: {},
+          bySeverity: {},
+          byCategory: {}
+        },
+        settings: defaultSettings,
+        isAnalyzing: false,
+        isSettingsOpen: false,
+        activeTab: 'text',
+        error: null,
+        history: [],
+        historyIndex: -1,
+        maxHistorySize: 50,
+
+        // テキスト関連アクション
+        setText: (text: string) => {
+          const currentText = get().text;
+          set({ text });
+          // テキストが変更されたら選択範囲をクリア
+          if (get().selectedTextRange) {
+            set({ selectedTextRange: null });
+          }
+          // 統計情報を更新
+          get().updateIssueStats();
+          // テキストが実際に変更された場合のみ履歴に保存
+          if (currentText !== text) {
+            get().saveToHistory('edit', 'テキストを編集');
+          }
+        },
+
+        setSelectedTextRange: (range: TextRange | null) => {
+          set({ selectedTextRange: range });
+        },
+
+        // 問題関連アクション
+        setIssues: (issues: Issue[]) => {
+          const augmented = augmentIssuesWithContext(issues);
+          set({ issues: augmented });
+          get().updateIssueStats();
+        },
 
       addIssues: (newIssues: Issue[]) => {
         const currentIssues = get().issues;
-        const allIssues = [...currentIssues, ...newIssues];
+        const augmentedNewIssues = augmentIssuesWithContext(newIssues);
+        const allIssues = [...currentIssues, ...augmentedNewIssues];
         set({ issues: allIssues });
         get().updateIssueStats();
       },
@@ -221,7 +275,7 @@ export const useAppStore = create<AppState & AppActions>()(
         }
 
         const suggestion = issue.suggestions[suggestionIndex];
-        
+
         // テキスト範囲の検証
         if (issue.range.start < 0 || issue.range.end > text.length || issue.range.start >= issue.range.end) {
           console.error('無効なテキスト範囲:', issue.range);
@@ -229,17 +283,30 @@ export const useAppStore = create<AppState & AppActions>()(
         }
 
         // 元のテキストの確認
-        const originalText = text.slice(issue.range.start, issue.range.end);
-        if (originalText !== issue.originalText) {
+        const currentSelection = text.slice(issue.range.start, issue.range.end);
+        const expectedOriginal = typeof issue.metadata?.originalText === 'string'
+          ? issue.metadata.originalText
+          : currentSelection;
+
+        if (currentSelection !== expectedOriginal) {
           console.warn('テキストが変更されています。範囲を再計算します。');
           // テキストが変更されている場合は、範囲を再計算する必要がある
           // ここでは簡易的に元のテキストで検索
-          const newStart = text.indexOf(originalText);
+          const newStart = expectedOriginal ? text.indexOf(expectedOriginal) : -1;
           if (newStart === -1) {
             return { success: false, error: '元のテキストが見つかりません' };
           }
           issue.range.start = newStart;
-          issue.range.end = newStart + originalText.length;
+          issue.range.end = newStart + expectedOriginal.length;
+          issue.metadata = {
+            ...issue.metadata,
+            originalText: expectedOriginal
+          };
+        }
+
+        const originalText = text.slice(issue.range.start, issue.range.end);
+        if (originalText !== expectedOriginal) {
+          return { success: false, error: '元のテキストが一致しません' };
         }
 
         try {
@@ -252,8 +319,9 @@ export const useAppStore = create<AppState & AppActions>()(
           set({ text: newText });
           
           // 該当する問題を削除
-          const updatedIssues = issues.filter(i => i.id !== issueId);
-          set({ issues: updatedIssues });
+          const remainingIssues = issues.filter(i => i.id !== issueId);
+          const augmentedRemaining = augmentIssuesWithContext(remainingIssues);
+          set({ issues: augmentedRemaining });
           get().updateIssueStats();
 
           // 成功ログ
@@ -362,20 +430,20 @@ export const useAppStore = create<AppState & AppActions>()(
 
       // 安全な一括修正機能
       applyAllAutoFixes: () => {
-        const { issues, text } = get();
+        const { issues, text, isSafeFix } = get();
         
         // autoFix=trueかつ安全な修正のみをフィルタリング
         const safeAutoFixIssues = issues.filter(issue => {
           // autoFixフラグの確認
           if (!issue.metadata?.autoFix) return false;
-          
+
           // 提案が存在するか確認
           if (!issue.suggestions || issue.suggestions.length === 0) return false;
-          
+
           // 安全な修正かどうか確認（意味変化リスクゼロ）
           const suggestion = issue.suggestions[0];
-          if (!this.isSafeFix(issue, suggestion)) return false;
-          
+          if (!isSafeFix(issue, suggestion)) return false;
+
           // テキスト範囲の検証
           if (issue.range.start < 0 || issue.range.end > text.length || issue.range.start >= issue.range.end) {
             return false;
@@ -388,13 +456,16 @@ export const useAppStore = create<AppState & AppActions>()(
           return {
             success: true,
             appliedCount: 0,
+            failedCount: 0,
+            appliedFixes: [],
+            failedFixes: [],
             message: '適用可能な安全な修正がありません'
           };
         }
 
         // 位置の降順でソート（後ろから修正して位置ずれを防ぐ）
         const sortedIssues = safeAutoFixIssues.sort((a, b) => b.range.start - a.range.start);
-        
+
         let newText = text;
         const appliedFixes: Array<{
           issueId: string;
@@ -412,9 +483,13 @@ export const useAppStore = create<AppState & AppActions>()(
           try {
             const suggestion = issue.suggestions![0];
             const originalText = newText.slice(issue.range.start, issue.range.end);
-            
+
             // 元のテキストが期待通りか確認
-            if (originalText !== issue.originalText) {
+            const expectedOriginal = typeof issue.metadata?.originalText === 'string'
+              ? issue.metadata.originalText
+              : originalText;
+
+            if (originalText !== expectedOriginal) {
               console.warn(`テキストが変更されています: ${issue.id}`);
               failedFixes.push({
                 issueId: issue.id,
@@ -446,10 +521,11 @@ export const useAppStore = create<AppState & AppActions>()(
         // テキストと問題リストを更新
         const appliedIssueIds = appliedFixes.map(fix => fix.issueId);
         const remainingIssues = issues.filter(issue => !appliedIssueIds.includes(issue.id));
+        const augmentedRemaining = augmentIssuesWithContext(remainingIssues);
         
         set({ 
           text: newText, 
-          issues: remainingIssues 
+          issues: augmentedRemaining 
         });
         get().updateIssueStats();
 
@@ -467,23 +543,28 @@ export const useAppStore = create<AppState & AppActions>()(
       isSafeFix: (issue: Issue, suggestion: any): boolean => {
         // 基本的な安全チェック
         if (!suggestion || !suggestion.text) return false;
-        
+
         // 意味変化リスクの低い修正のみを許可
         const safeCategories = ['consistency', 'style'];
         if (!safeCategories.includes(issue.category)) return false;
-        
+
         // 重要度が低いもののみ
         if (issue.severity === 'error') return false;
-        
+
         // 提案の信頼度が高いもののみ
         if (suggestion.confidence && suggestion.confidence < 0.8) return false;
-        
+
         // 文字数が大きく変わらないもののみ（意味変化の可能性を下げる）
-        const originalLength = issue.originalText?.length || 0;
+        const baseline = typeof issue.metadata?.originalText === 'string'
+          ? issue.metadata.originalText
+          : '';
+        const originalLength = baseline.length;
         const suggestionLength = suggestion.text.length;
-        const lengthRatio = Math.abs(originalLength - suggestionLength) / originalLength;
+        const lengthRatio = originalLength === 0
+          ? 0
+          : Math.abs(originalLength - suggestionLength) / originalLength;
         if (lengthRatio > 0.5) return false; // 50%以上の変化は許可しない
-        
+
         return true;
       },
 
@@ -570,7 +651,8 @@ export const useAppStore = create<AppState & AppActions>()(
           error: null
         });
       }
-    }),
+      };
+    },
     {
       name: 'japanese-proofreading-app-storage',
       storage: createJSONStorage(() => localStorage),

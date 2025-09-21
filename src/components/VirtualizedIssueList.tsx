@@ -45,13 +45,13 @@ export default function VirtualizedIssueList({
     if (!filters || !issues) return [];
     
     return issues.filter(issue => {
-      if (filters.sources && filters.sources.length > 0 && !filters.sources.includes(issue.source)) {
+      if (filters.source && filters.source.length > 0 && !filters.source.includes(issue.source)) {
         return false;
       }
-      if (filters.severities && filters.severities.length > 0 && !filters.severities.includes(issue.severity)) {
+      if (filters.severity && filters.severity.length > 0 && !filters.severity.includes(issue.severity)) {
         return false;
       }
-      if (filters.categories && filters.categories.length > 0 && !filters.categories.includes(issue.category)) {
+      if (filters.category && filters.category.length > 0 && !filters.category.includes(issue.category)) {
         return false;
       }
       return true;
@@ -89,10 +89,11 @@ export default function VirtualizedIssueList({
 
   // 重要度バッジコンポーネント
   const SeverityBadge = ({ severity }: { severity: IssueSeverity }) => {
-    const { icon, label, className } = getSeverityAccessibilityInfo(severity);
+    const severityInfo = getSeverityAccessibilityInfo(severity);
+    const { icon, label, colorClass } = severityInfo;
     return (
       <span
-        className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${className}`}
+        className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${colorClass}`}
         role="img"
         aria-label={label}
       >
@@ -104,14 +105,14 @@ export default function VirtualizedIssueList({
 
   // カテゴリタグコンポーネント
   const CategoryTag = ({ category }: { category: IssueCategory }) => {
-    const { icon, label, className } = getCategoryAccessibilityInfo(category);
+    const categoryInfo = getCategoryAccessibilityInfo(category);
+    const { label } = categoryInfo;
     return (
       <span
-        className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${className}`}
+        className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800"
         role="img"
         aria-label={label}
       >
-        <span aria-hidden="true">{icon}</span>
         <span>{label}</span>
       </span>
     );
@@ -125,7 +126,6 @@ export default function VirtualizedIssueList({
     return (
       <li
         key={issue.id}
-        role="listitem"
         tabIndex={0}
         className={`p-3 border-b border-slate-200 cursor-pointer transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset ${
           isSelected ? 'bg-blue-50 border-blue-200' : ''
@@ -133,7 +133,7 @@ export default function VirtualizedIssueList({
         onClick={() => handleIssueSelect(issue.id)}
         onKeyDown={(e) => handleKeyDown(e, issue.id)}
         aria-label={`問題 ${actualIndex + 1}: ${issue.message}`}
-        aria-selected={isSelected}
+        aria-current={isSelected ? 'true' : undefined}
         style={{ height: itemHeight }}
       >
         <div className="flex items-start justify-between gap-2">
@@ -171,13 +171,13 @@ export default function VirtualizedIssueList({
                 <button
                   key={source}
                   type="button"
-                  onClick={() => filterIssuesBySource(source)}
+                  onClick={() => filterIssuesBySource([source])}
                   className={`px-2 py-1 text-xs rounded border ${
-                    filters.sources && filters.sources.includes(source)
+                    filters.source && filters.source.includes(source)
                       ? 'bg-blue-100 border-blue-300 text-blue-700'
                       : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
                   } ${getFocusIndicatorClasses()}`}
-                  aria-pressed={filters.sources && filters.sources.includes(source)}
+                  aria-pressed={filters.source && filters.source.includes(source)}
                 >
                   {source === 'rule' ? 'ルール' : 'LLM'}
                 </button>
@@ -192,13 +192,13 @@ export default function VirtualizedIssueList({
                 <button
                   key={severity}
                   type="button"
-                  onClick={() => filterIssuesBySeverity(severity)}
+                  onClick={() => filterIssuesBySeverity([severity])}
                   className={`px-2 py-1 text-xs rounded border ${
-                    filters.severities && filters.severities.includes(severity)
+                    filters.severity && filters.severity.includes(severity)
                       ? 'bg-blue-100 border-blue-300 text-blue-700'
                       : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
                   } ${getFocusIndicatorClasses()}`}
-                  aria-pressed={filters.severities && filters.severities.includes(severity)}
+                  aria-pressed={filters.severity && filters.severity.includes(severity)}
                 >
                   {severity === 'info' ? '情報' : severity === 'warn' ? '警告' : 'エラー'}
                 </button>
@@ -213,13 +213,13 @@ export default function VirtualizedIssueList({
                 <button
                   key={category}
                   type="button"
-                  onClick={() => filterIssuesByCategory(category)}
+                  onClick={() => filterIssuesByCategory([category])}
                   className={`px-2 py-1 text-xs rounded border ${
-                    filters.categories && filters.categories.includes(category)
+                    filters.category && filters.category.includes(category)
                       ? 'bg-blue-100 border-blue-300 text-blue-700'
                       : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
                   } ${getFocusIndicatorClasses()}`}
-                  aria-pressed={filters.categories && filters.categories.includes(category)}
+                  aria-pressed={filters.category && filters.category.includes(category)}
                 >
                   {category === 'grammar' ? '文法' : 
                    category === 'style' ? 'スタイル' :
@@ -255,7 +255,7 @@ export default function VirtualizedIssueList({
         aria-describedby="issue-list-description"
       >
         <div id="issue-list-description" className="sr-only">
-          {generateIssueListDescription(filteredIssues, stats)}
+          {generateIssueListDescription(filteredIssues, {})}
         </div>
         
         <div style={{ height: totalHeight, position: 'relative' }}>

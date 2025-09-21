@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { useApp } from '@/lib/hooks';
 import { getKeyboardNavigationManager } from '@/lib/keyboard-navigation';
 import { getFocusIndicatorClasses, getAccessibleAnimationClasses } from '@/lib/accessibility-utils';
@@ -21,22 +21,22 @@ export default function Header() {
 
   const headerRef = useRef<HTMLElement>(null);
 
-  const handleAnalyze = () => {
+  const handleAnalyze = useCallback(() => {
     console.log('解析ボタンがクリックされました');
     analyzeText();
-  };
+  }, [analyzeText]);
 
-  const handleLLMSuggestions = () => {
+  const handleLLMSuggestions = useCallback(() => {
     generateLLMSuggestions('business');
-  };
+  }, [generateLLMSuggestions]);
 
-  const handleFixAll = () => {
+  const handleFixAll = useCallback(() => {
     applyAllAutoFixesToIssues();
-  };
+  }, [applyAllAutoFixesToIssues]);
 
-  const handleSettings = () => {
+  const handleSettings = useCallback(() => {
     openSettings();
-  };
+  }, [openSettings]);
 
   // キーボードナビゲーションの設定
   useEffect(() => {
@@ -64,7 +64,7 @@ export default function Header() {
       ) as HTMLElement[];
       navigationManager.registerFocusableElements(focusableElements);
     }
-  }, []);
+  }, [handleAnalyze, handleSettings]);
 
   return (
     <header 

@@ -50,6 +50,8 @@ export interface AppConfig {
   observability: ObservabilityConfig;
 }
 
+const DEFAULT_ALLOWED_CHARS = String.raw`[ぁ-んァ-ヶ一-龯a-zA-Z0-9\s。、！？「」『』（）［］｛｝：；"'.,?!\-_=+*&%$#@~`|\\/<>]`;
+
 /**
  * 設定を環境変数から読み込み
  */
@@ -64,7 +66,7 @@ function loadConfig(): AppConfig {
     promptSanitizer: {
       enabled: process.env.PROMPT_SANITIZER_ENABLED !== 'false',
       maxLength: parseInt(process.env.PROMPT_MAX_LENGTH || '1000'),
-      allowedChars: process.env.PROMPT_ALLOWED_CHARS || '[ぁ-んァ-ヶ一-龯a-zA-Z0-9\\s。、！？「」『』（）［］｛｝：；"\\'\',.?!\\-_=+*&%$#@~`|\\\\/<>]',
+      allowedChars: process.env.PROMPT_ALLOWED_CHARS || DEFAULT_ALLOWED_CHARS,
       logThreats: process.env.PROMPT_LOG_THREATS === 'true'
     },
     schemaValidator: {
