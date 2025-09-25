@@ -240,31 +240,42 @@ ${text}
       },
     ];
 
-    const findTextPosition = (sourceText: string, issueLike: { message?: string }): { start: number; end: number } | null => {
+    const findTextPosition = (
+      sourceText: string,
+      issueLike: { message?: string; range?: { start?: number; end?: number } }
+    ): { start: number; end: number } | null => {
       const msg = issueLike?.message || '';
+      const hintStart = typeof issueLike?.range?.start === 'number' ? issueLike.range.start : undefined;
+      const windowSize = 50;
       for (const def of CORRECTION_PATTERNS) {
         const triggerMatched = typeof def.pattern === 'string'
           ? msg.includes(def.pattern)
           : def.pattern.test(msg);
-        // メッセージに合致しない場合でも、テキスト内に対象語があれば位置を返す（フォールバック）
-        if (!triggerMatched) {
-          // フォールバック: matchText をテキストから検索
+        // まずは LLM が返した範囲付近で検索（ズレ補正）
+        if (typeof hintStart === 'number') {
+          const start = Math.max(0, hintStart - windowSize);
+          const end = Math.min(sourceText.length, hintStart + windowSize);
+          const windowText = sourceText.slice(start, end);
           if (typeof def.matchText === 'string') {
-            const idx = sourceText.indexOf(def.matchText);
-            if (idx !== -1) {
-              return { start: idx, end: idx + def.matchText.length };
+            const localIdx = windowText.indexOf(def.matchText);
+            if (localIdx !== -1) {
+              const abs = start + localIdx;
+              return { start: abs, end: abs + def.matchText.length };
             }
-            continue;
           } else {
             def.matchText.lastIndex = 0;
-            const m2 = def.matchText.exec(sourceText);
-            if (m2 && typeof m2.index === 'number') {
-              const matched2 = m2[0] ?? '';
-              const s2 = m2.index;
-              return { start: s2, end: s2 + matched2.length };
+            const mWin = def.matchText.exec(windowText);
+            if (mWin && typeof mWin.index === 'number') {
+              const matched = mWin[0] ?? '';
+              const abs = start + mWin.index;
+              return { start: abs, end: abs + matched.length };
             }
-            continue;
           }
+        }
+
+        // メッセージ一致の有無に関わらず、全体検索でフォールバック
+        if (!triggerMatched) {
+          // 続行して全体検索へ
         }
 
         if (typeof def.matchText === 'string') {
@@ -300,7 +311,7 @@ ${text}
       const message = rest.message || '';
 
       // 汎用パターンで検索して位置を補正
-      const found = findTextPosition(text, { message });
+      const found = findTextPosition(text, { message, range: initialRange });
       if (found) {
         correctedStart = found.start;
         correctedEnd = found.end;

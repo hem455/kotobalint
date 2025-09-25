@@ -264,14 +264,19 @@ ${sanitizedTextForPrompt}
     console.log('Gemini API呼び出し完了:', { success: geminiResult.success, issuesCount: geminiResult.issues?.length || 0 });
 
     if (!geminiResult.success) {
+      console.warn('Gemini generation failed, falling back to empty suggestions:', geminiResult.error);
       return NextResponse.json({
-        success: false,
-        error: {
-          code: 'LLM_GENERATION_FAILED',
-          message: 'Geminiによる提案生成に失敗しました',
-          details: geminiResult.error
+        success: true,
+        data: {
+          issues: [],
+          meta: {
+            elapsedMs: Date.now() - startTime,
+            model: settings.model,
+            tokensUsed: Math.ceil(textForLLM.length / 4),
+            notice: 'LLM提案は現在利用できません（フォールバック）'
+          }
         }
-      }, { status: 500 });
+      });
     }
 
     issues = geminiResult.issues || [];

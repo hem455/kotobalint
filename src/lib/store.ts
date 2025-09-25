@@ -291,6 +291,11 @@ export const useAppStore = create<AppState & AppActions>()(
           return { success: false, error: '修正提案が見つかりません' };
         }
 
+        // LLM 由来の提案は適用不可（プレビューのみ）
+        if (issue.source === 'llm') {
+          return { success: false, error: 'AI提案はプレビュー専用のため自動適用できません' };
+        }
+
         const suggestion = issue.suggestions[suggestionIndex];
 
         // テキスト範囲の検証

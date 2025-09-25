@@ -50,9 +50,11 @@ const IssueDetail = memo(function IssueDetail() {
 
   // 修正案の適用
   const handleApplySuggestion = (suggestionIndex: number) => {
-    if (selectedIssue) {
-      applySuggestion(selectedIssue.id, suggestionIndex);
+    if (!selectedIssue) return;
+    if (selectedIssue.source === 'llm') {
+      return; // LLM提案は適用不可（プレビューのみ）
     }
+    applySuggestion(selectedIssue.id, suggestionIndex);
   };
 
   // 問題の無視
@@ -158,13 +160,17 @@ const IssueDetail = memo(function IssueDetail() {
                     )}
                   </div>
                   <div className="flex flex-col gap-1">
-                    <button
-                      onClick={() => handleApplySuggestion(index)}
-                      className={`btn-primary text-xs px-3 py-1 ${getFocusIndicatorClasses()}`}
-                      aria-label={`修正案${index + 1}を適用`}
-                    >
-                      適用
-                    </button>
+                    {selectedIssue.source === 'rule' ? (
+                      <button
+                        onClick={() => handleApplySuggestion(index)}
+                        className={`btn-primary text-xs px-3 py-1 ${getFocusIndicatorClasses()}`}
+                        aria-label={`修正案${index + 1}を適用`}
+                      >
+                        適用
+                      </button>
+                    ) : (
+                      <span className="text-xs text-slate-500" aria-label="AI提案はプレビューのみ">プレビュー</span>
+                    )}
                     {suggestion.isPreferred && (
                       <span className="text-xs text-green-600 font-medium" role="status" aria-label="推奨修正案">
                         推奨
@@ -203,7 +209,7 @@ const IssueDetail = memo(function IssueDetail() {
       {/* アクションボタン */}
       <div className="pt-4 border-t border-slate-200">
         <div className="flex gap-2">
-          {selectedIssue.suggestions && selectedIssue.suggestions.length > 0 && (
+          {selectedIssue.suggestions && selectedIssue.suggestions.length > 0 && selectedIssue.source === 'rule' && (
             <button
               onClick={() => handleApplySuggestion(0)}
               className={`btn-primary text-sm px-4 py-2 flex-1 ${getFocusIndicatorClasses()}`}
