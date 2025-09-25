@@ -34,9 +34,10 @@ export class RuleManager {
     loadedRules?: number;
   }> {
     try {
-      // ファイルの存在確認と読み取り権限チェック
+      // 単一ステップの非同期読み込み
+      let content: string;
       try {
-        await fs.promises.access(filePath, fs.constants.R_OK);
+        content = await fs.promises.readFile(filePath, 'utf-8');
       } catch (error) {
         const err = error as NodeJS.ErrnoException;
         if (err.code === 'ENOENT') {
@@ -44,16 +45,12 @@ export class RuleManager {
             success: false,
             errors: [`ルールファイルが見つかりません: ${filePath}`]
           };
-        } else {
-          return {
-            success: false,
-            errors: [`ルールファイルにアクセスできません: ${filePath} (${err.message})`]
-          };
         }
+        return {
+          success: false,
+          errors: [`ルールファイルにアクセスできません: ${filePath} (${err.message})`]
+        };
       }
-
-      // ファイル読み込み
-      const content = fs.readFileSync(filePath, 'utf-8');
 
       // YAML解析
       const parseResult = YamlRuleParser.parseYamlFile(content);

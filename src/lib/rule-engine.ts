@@ -65,7 +65,12 @@ export class RuleEngine {
     const key = `${pattern}:${flags || ''}`;
     
     if (this.regexCache.has(key)) {
-      return this.regexCache.get(key)!;
+      const regex = this.regexCache.get(key)!;
+      // グローバルフラグを持つ場合はlastIndexをリセット
+      if (regex.global) {
+        regex.lastIndex = 0;
+      }
+      return regex;
     }
 
     try {

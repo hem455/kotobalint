@@ -102,8 +102,8 @@ export default function TextEditor() {
       
       // 選択された問題の範囲かチェック（重複検出）
       const isSelected = selectedIssue && 
-        i <= selectedIssue.range.end && 
-        j >= selectedIssue.range.start;
+        i >= selectedIssue.range.start && 
+        j <= selectedIssue.range.end;
 
       if (sev) {
         const classes = isSelected ? `${sevClass[sev]} ${selectedClass}` : sevClass[sev];
@@ -123,12 +123,39 @@ export default function TextEditor() {
     return lines.map((_, index) => index + 1);
   }, [text]);
 
-  // スクロール同期
+  // スクロール同期（改良版）
   const syncScroll = () => {
     if (!editorRef.current || !overlayRef.current) return;
+    
+    // より確実な同期のため、直接設定
     overlayRef.current.scrollTop = editorRef.current.scrollTop;
     overlayRef.current.scrollLeft = editorRef.current.scrollLeft;
+    
+    // さらに、requestAnimationFrameでも同期を確実にする
+    requestAnimationFrame(() => {
+      if (!editorRef.current || !overlayRef.current) return;
+      overlayRef.current.scrollTop = editorRef.current.scrollTop;
+      overlayRef.current.scrollLeft = editorRef.current.scrollLeft;
+    });
   };
+
+  // テキスト更新後にも一度同期（折返し再計算でスクロール量が変わることがある）
+  useEffect(() => {
+    syncScroll();
+  }, [text, showLineNumbers]);
+
+  // スクロールイベントのリスナーを追加（リアルタイム同期）
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const handleScroll = () => {
+      syncScroll();
+    };
+
+    editor.addEventListener('scroll', handleScroll);
+    return () => editor.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // テキスト変更ハンドラー
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -148,8 +175,12 @@ export default function TextEditor() {
     }
   };
 
-  // ハイライトクリックハンドラー
+  // ハイライトクリックハンドラー（改良版）
   const handleHighlightClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // オーバーレイのクリックイベントを停止
+    e.preventDefault();
+    e.stopPropagation();
+    
     const target = e.target as HTMLElement;
     const spanElement = target.closest('[data-issue-range]') as HTMLElement;
     if (spanElement) {
@@ -159,6 +190,41 @@ export default function TextEditor() {
         selectTextRange({ start, end });
         editorRef.current?.focus();
       }
+    }
+  };
+
+  // テキストエリアでのクリックイベント処理
+  const handleTextAreaClick = (e: React.MouseEvent<HTMLTextAreaElement>) => {
+    // クリック位置から問題の範囲を特定
+    const textarea = e.currentTarget;
+    const rect = textarea.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+    
+    // クリック位置の文字位置を計算（簡易版）
+    const lineHeight = 24; // leading-6 = 1.5rem = 24px
+    const charWidth = 8; // 概算
+    const padding = 16; // p-4 = 1rem = 16px
+    const lineNumberWidth = showLineNumbers ? 64 : 0; // pl-16 = 4rem = 64px
+    
+    const lineIndex = Math.floor((clickY - padding) / lineHeight);
+    const charIndex = Math.floor((clickX - padding - lineNumberWidth) / charWidth);
+    
+    // テキスト内の実際の位置を計算
+    const lines = text.split('\n');
+    let textPosition = 0;
+    for (let i = 0; i < lineIndex && i < lines.length; i++) {
+      textPosition += lines[i].length + 1; // +1 for newline
+    }
+    textPosition += Math.min(charIndex, lines[lineIndex]?.length || 0);
+    
+    // 該当する問題を検索
+    const clickedIssue = filteredIssues.find(issue => 
+      textPosition >= issue.range.start && textPosition <= issue.range.end
+    );
+    
+    if (clickedIssue) {
+      selectTextRange(clickedIssue.range);
     }
   };
 
@@ -207,9 +273,13 @@ export default function TextEditor() {
         <div
           ref={overlayRef}
           aria-hidden
-          className={`pointer-events-none absolute inset-0 whitespace-pre-wrap break-words p-4 font-mono text-sm leading-6 text-transparent ${
+          className={`absolute inset-0 whitespace-pre-wrap p-4 font-mono text-sm leading-6 text-transparent ${
             showLineNumbers ? 'pl-16' : ''
           }`}
+          style={{ 
+            tabSize: 4,
+            pointerEvents: 'none' // デフォルトでは無効
+          }}
           dangerouslySetInnerHTML={{ __html: highlightedHTML }}
           onClick={handleHighlightClick}
         />
@@ -220,10 +290,13 @@ export default function TextEditor() {
           value={text}
           onChange={handleTextChange}
           onSelect={handleTextSelect}
-          onScroll={syncScroll}
+          onClick={handleTextAreaClick}
           className={`absolute inset-0 resize-none bg-transparent p-4 font-mono text-sm leading-6 caret-slate-900 text-slate-900 selection:bg-slate-200 ${getFocusIndicatorClasses()} ${
             showLineNumbers ? 'pl-16' : ''
           }`}
+          style={{ 
+            tabSize: 4
+          }}
           spellCheck={false}
           placeholder="ここにテキストを入力してください..."
           aria-label="テキストエディター"

@@ -11,6 +11,8 @@ import type {
   IssueCategory,
   IssueSource
 } from '@/types';
+import type { LlmProvider, LlmModel } from '@/types/llm';
+import { AVAILABLE_MODELS } from '@/types/llm';
 
 // 履歴管理用のインターフェース
 export interface TextHistory {
@@ -118,6 +120,19 @@ interface AppActions {
   clearAll: () => void;
 }
 
+// 環境変数から LLM 設定を読み込み（型に適合するようバリデーション）
+const RAW_LLM_PROVIDER = process.env.NEXT_PUBLIC_LLM_PROVIDER || 'gemini';
+const ENV_LLM_PROVIDER: LlmProvider = RAW_LLM_PROVIDER === 'gemini' ? 'gemini' : 'gemini';
+
+const RAW_LLM_MODEL = process.env.NEXT_PUBLIC_LLM_MODEL || 'gemini-2.5-flash';
+const allowedModels = AVAILABLE_MODELS[ENV_LLM_PROVIDER] as readonly LlmModel[];
+const ENV_LLM_MODEL: LlmModel = (allowedModels as readonly string[]).includes(RAW_LLM_MODEL)
+  ? (RAW_LLM_MODEL as LlmModel)
+  : 'gemini-2.5-flash';
+const ENV_LLM_BASE_URL = process.env.NEXT_PUBLIC_LLM_BASE_URL || 'https://generativelanguage.googleapis.com';
+const ENV_LLM_API_KEY = process.env.NEXT_PUBLIC_LLM_API_KEY || '';
+const ENV_LLM_ENABLED = Boolean(ENV_LLM_API_KEY && ENV_LLM_BASE_URL);
+
 // デフォルト設定
 const defaultSettings: AppSettings = {
   analysis: {
@@ -131,11 +146,11 @@ const defaultSettings: AppSettings = {
     severityOverrides: {}
   },
   llm: {
-    enabled: true,
-    provider: 'gemini',
-    model: 'gemini-2.5-flash',
-    baseUrl: 'https://generativelanguage.googleapis.com',
-    apiKey: '',
+    enabled: ENV_LLM_ENABLED,
+    provider: ENV_LLM_PROVIDER,
+    model: ENV_LLM_MODEL,
+    baseUrl: ENV_LLM_BASE_URL,
+    apiKey: ENV_LLM_API_KEY,
     timeoutMs: 30000,
     maxSuggestions: 3
   },
@@ -208,7 +223,9 @@ export const useAppStore = create<AppState & AppActions>()(
         isAnalyzing: false,
         isSettingsOpen: false,
         activeTab: 'text',
-        error: null,
+        error: ENV_LLM_ENABLED
+          ? null
+          : 'LLM設定が不完全です（APIキーまたはBase URLが未設定）。LLM機能を無効化しました。',
         history: [],
         historyIndex: -1,
         maxHistorySize: 50,
@@ -395,11 +412,23 @@ export const useAppStore = create<AppState & AppActions>()(
           ...newSettings,
           analysis: { ...currentSettings.analysis, ...newSettings.analysis },
           rules: { ...currentSettings.rules, ...newSettings.rules },
-          llm: { ...currentSettings.llm, ...newSettings.llm },
+          llm: {
+            ...currentSettings.llm,
+            ...newSettings.llm,
+            enabled: Boolean(
+              (newSettings.llm?.apiKey ?? currentSettings.llm.apiKey) &&
+              (newSettings.llm?.baseUrl ?? currentSettings.llm.baseUrl)
+            )
+          },
           ui: { ...currentSettings.ui, ...newSettings.ui },
           privacy: { ...currentSettings.privacy, ...newSettings.privacy }
         };
-        set({ settings: updatedSettings });
+        // 必須項目が欠けている場合はLLMを無効化しエラーを設定
+        if (!updatedSettings.llm.enabled) {
+          set({ settings: updatedSettings, error: 'LLM設定が不完全です（APIキーまたはBase URLが未設定）。LLM機能を無効化しました。' });
+        } else {
+          set({ settings: updatedSettings, error: null });
+        }
       },
 
       resetSettings: () => {
@@ -555,10 +584,10 @@ export const useAppStore = create<AppState & AppActions>()(
         if (suggestion.confidence && suggestion.confidence < 0.8) return false;
 
         // 文字数が大きく変わらないもののみ（意味変化の可能性を下げる）
-        const baseline = typeof issue.metadata?.originalText === 'string'
-          ? issue.metadata.originalText
-          : '';
-        const originalLength = baseline.length;
+        if (typeof issue.metadata?.originalText !== 'string' || issue.metadata.originalText.trim().length === 0) {
+          return false;
+        }
+        const originalLength = issue.metadata.originalText.length;
         const suggestionLength = suggestion.text.length;
         const lengthRatio = originalLength === 0
           ? 0

@@ -1,6 +1,6 @@
 import { useAppStore } from './store';
 import { apiClient, generateSuggestionsForText } from './api-client';
-import type { LintRequest, ContentStyle } from '@/types';
+import type { LintRequest, ContentStyle, IssueSource, IssueSeverity, IssueCategory } from '@/types';
 
 /**
  * テキスト解析アクション
@@ -25,7 +25,15 @@ export const useAnalysisActions = () => {
       return;
     }
 
-    console.log('解析を開始します:', targetText);
+    // 機密性配慮: 生テキストは出力しない
+    // ログ方針: 長さと先頭プレビュー(最大50文字、改行除去)のみを、
+    // settings.privacy.logAnalytics が有効な場合に限り出力する
+    const previewLength = Math.min(50, targetText.length);
+    const preview = targetText.slice(0, previewLength).replace(/\n/g, ' ');
+    const redactedInfo = `[len=${targetText.length}] preview="${preview}${targetText.length > previewLength ? '…' : ''}"`;
+    if (useAppStore.getState().settings.privacy.logAnalytics) {
+      console.log('解析を開始します:', redactedInfo);
+    }
     setAnalyzing(true);
     clearError();
 
@@ -257,15 +265,15 @@ export const useIssueActions = () => {
     selectIssue(issueId);
   };
 
-  const filterIssuesBySource = (sources: string[]) => {
-    setIssueFilters({ source: sources as any });
+  const filterIssuesBySource = (sources: IssueSource[]) => {
+    setIssueFilters({ source: sources });
   };
 
-  const filterIssuesBySeverity = (severities: string[]) => {
-    setIssueFilters({ severity: severities as any });
+  const filterIssuesBySeverity = (severities: IssueSeverity[]) => {
+    setIssueFilters({ severity: severities });
   };
 
-  const filterIssuesByCategory = (categories: string[]) => {
+  const filterIssuesByCategory = (categories: IssueCategory[]) => {
     setIssueFilters({ category: categories });
   };
 

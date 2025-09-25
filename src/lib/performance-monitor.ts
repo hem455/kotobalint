@@ -64,12 +64,16 @@ export class PerformanceMonitor {
   /**
    * キャッシュヒット率を計算
    */
-  private calculateCacheHitRate(cacheStats?: { rules: number; regex: number }): number {
-    if (!cacheStats) return 0;
-    // 簡易的な計算（実際のヒット率はより複雑な実装が必要）
-    return Math.min(0.8, cacheStats.regex / Math.max(1, cacheStats.rules));
+  private calculateCacheHitRate(cacheStats?: { 
+    hits: number; 
+    misses: number; 
+    rules?: number; 
+    regex?: number 
+  }): number {
+    if (!cacheStats || !('hits' in cacheStats) || !('misses' in cacheStats)) return 0;
+    const totalAccess = cacheStats.hits + cacheStats.misses;
+    return totalAccess > 0 ? cacheStats.hits / totalAccess : 0;
   }
-
   /**
    * メトリクスを追加
    */

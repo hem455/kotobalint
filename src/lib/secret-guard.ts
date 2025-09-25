@@ -46,40 +46,11 @@ function isValidCreditCard(text: string): boolean {
   return isValidLuhn(normalizedCardNumber);
 }
 
-const secretPatterns = [
-  // OpenAI系APIキー（プレフィックス対応）
-  /sk-(?:proj-|svcacct-|None-)?[^\s'"]{16,}/,
-  
-  // Google API key
-  /AIza[0-9A-Za-z\-_]{35}/,
-  
-  // AWS Access Key
-  /AKIA[0-9A-Z]{16}/,
-  
-  // 秘密鍵
-  /-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----/,
-  
-  // GitHub Personal Access Token
-  /ghp_[A-Za-z0-9]{36}/,
-  
-  // GitHub fine-grained Personal Access Token
-  /github_pat_[A-Za-z0-9_]{22}_[A-Za-z0-9_]{59}/,
-  
-  // 社会保険番号
-  /\b[0-9]{3}-[0-9]{2}-[0-9]{4}\b/,
-  
-  // パスポート番号
-  /\b[A-Z]{2}[0-9]{7}\b/,
-  
-  // 運転免許証番号
-  /\b[0-9]{12}\b/,
-];
+// 単一ソース: パターンとラベル
+type SecretDefinition = { pattern: RegExp; label: string };
 
-/**
- * パターンとラベルのマッピング
- */
-const secretPatternMap = [
-  { pattern: /sk-(?:proj-|svcacct-|None-)?[^\s'"]{16,}/, label: 'OpenAI API Key' },
+const secretDefinitions: SecretDefinition[] = [
+  { pattern: /sk-(?:proj-|svcacct-|None-)?[^\s'\"]{16,}/, label: 'OpenAI API Key' },
   { pattern: /AIza[0-9A-Za-z\-_]{35}/, label: 'Google API Key' },
   { pattern: /AKIA[0-9A-Z]{16}/, label: 'AWS Access Key' },
   { pattern: /-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----/, label: 'Private Key' },
@@ -87,8 +58,27 @@ const secretPatternMap = [
   { pattern: /github_pat_[A-Za-z0-9_]{22}_[A-Za-z0-9_]{59}/, label: 'GitHub Fine-grained PAT' },
   { pattern: /\b[0-9]{3}-[0-9]{2}-[0-9]{4}\b/, label: 'SSN' },
   { pattern: /\b[A-Z]{2}[0-9]{7}\b/, label: 'Passport' },
-  { pattern: /\b[0-9]{12}\b/, label: 'Driver License' },
 ];
+
+// 文脈ベースの運転免許証番号検出（キーワード近傍±50文字に12桁連番）
+function hasDriverLicenseWithContext(text: string): boolean {
+  const keyword = /(運転免許証|免許証|免許番号|運転免許|driver\s*license)/i;
+  const digit12 = /\b\d{12}\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = keyword.exec(text)) !== null) {
+    const center = m.index;
+    const start = Math.max(0, center - 50);
+    const end = Math.min(text.length, center + 50);
+    const windowText = text.slice(start, end);
+    digit12.lastIndex = 0;
+    if (digit12.test(windowText)) return true;
+  }
+  return false;
+}
+
+// 互換: 正規表現配列/マップを定義から派生
+const secretPatterns = secretDefinitions.map(d => d.pattern);
+const secretPatternMap = secretDefinitions;
 
 /**
  * テキストにシークレットが含まれているかチェック
@@ -101,6 +91,10 @@ export function containsSecret(text: string): boolean {
   
   // クレジットカード番号のLuhn検証
   if (isValidCreditCard(text)) {
+    return true;
+  }
+  // 運転免許証番号（文脈ベース）
+  if (hasDriverLicenseWithContext(text)) {
     return true;
   }
   
@@ -123,6 +117,10 @@ export function detectSecretType(text: string): string[] {
   // クレジットカード番号の特別処理
   if (isValidCreditCard(text)) {
     detectedTypes.push('Credit Card');
+  }
+  // 運転免許証番号の特別処理（文脈）
+  if (hasDriverLicenseWithContext(text)) {
+    detectedTypes.push('Driver License');
   }
   
   return detectedTypes;

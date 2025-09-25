@@ -220,6 +220,52 @@ ${text}
     const parsed = JSON.parse(cleanResponse);
     
     // 各issueにsourceフィールドを追加し、位置を正規表現で修正
+    // 追加: 汎用的な校正パターンと位置検出ロジック
+    const CORRECTION_PATTERNS: Array<{
+      pattern: RegExp | string; // issue.message に対する判定
+      matchText: RegExp | string; // 原文 text から位置を取る対象
+      suggestion?: string;
+    }> = [
+      {
+        // 表記ゆれ: コンピュータ/コンピューター
+        pattern: /(コンピュータ|コンピューター)/,
+        matchText: /(コンピュータ|コンピューター)/g,
+        suggestion: 'コンピューター'
+      },
+      {
+        // ら抜き言葉: 食べれる
+        pattern: /(食べれる|ら抜き)/,
+        matchText: /食べれる/g,
+        suggestion: '食べられる'
+      },
+    ];
+
+    const findTextPosition = (sourceText: string, issueLike: { message?: string }): { start: number; end: number } | null => {
+      const msg = issueLike?.message || '';
+      for (const def of CORRECTION_PATTERNS) {
+        const triggerMatched = typeof def.pattern === 'string'
+          ? msg.includes(def.pattern)
+          : def.pattern.test(msg);
+        if (!triggerMatched) continue;
+
+        if (typeof def.matchText === 'string') {
+          const idx = sourceText.indexOf(def.matchText);
+          if (idx !== -1) {
+            return { start: idx, end: idx + def.matchText.length };
+          }
+        } else {
+          def.matchText.lastIndex = 0; // 念のため先頭から
+          const m = def.matchText.exec(sourceText);
+          if (m && typeof m.index === 'number') {
+            const matched = m[0] ?? '';
+            const s = m.index;
+            return { start: s, end: s + matched.length };
+          }
+        }
+      }
+      return null;
+    };
+
     const issuesWithSource = (parsed.issues || []).map((issue: any) => {
       const {
         suggestions: rawSuggestions,
@@ -234,25 +280,11 @@ ${text}
       // メッセージから問題のキーワードを抽出して位置を修正
       const message = rest.message || '';
 
-      // 表記ゆれの場合
-      if (message.includes('コンピュータ') && message.includes('コンピューター')) {
-        const computerMatch = text.match(/コンピュータ/g);
-        const computererMatch = text.match(/コンピューター/g);
-        if (computerMatch && computererMatch) {
-          // 最初に見つかった「コンピュータ」の位置を使用
-          const computerIndex = text.indexOf('コンピュータ');
-          correctedStart = computerIndex;
-          correctedEnd = computerIndex + 'コンピュータ'.length;
-        }
-      }
-      
-      // ら抜き言葉の場合
-      if (message.includes('食べれる') || message.includes('ら抜き')) {
-        const taberuIndex = text.indexOf('食べれる');
-        if (taberuIndex !== -1) {
-          correctedStart = taberuIndex;
-          correctedEnd = taberuIndex + '食べれる'.length;
-        }
+      // 汎用パターンで検索して位置を補正
+      const found = findTextPosition(text, { message });
+      if (found) {
+        correctedStart = found.start;
+        correctedEnd = found.end;
       }
 
       const safeStart = typeof correctedStart === 'number' && correctedStart >= 0 ? correctedStart : 0;

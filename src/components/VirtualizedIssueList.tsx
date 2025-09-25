@@ -2,7 +2,7 @@
 
 import React, { useMemo, useCallback, useState, useRef, useEffect } from 'react';
 import { useIssues, useSelectedIssue } from '@/lib/hooks';
-import { IssueSeverity, IssueCategory, IssueSource } from '@/types';
+import { IssueSeverity, IssueCategory, IssueSource, Issue } from '@/types';
 import { 
   getSeverityAccessibilityInfo, 
   getCategoryAccessibilityInfo, 
@@ -21,6 +21,95 @@ interface VirtualizedIssueListProps {
  * 仮想スクロール対応の問題リストコンポーネント
  * 大量の問題がある場合のパフォーマンス向上
  */
+// 重要度バッジコンポーネント（メモ化）
+const SeverityBadge = React.memo(({ severity }: { severity: IssueSeverity }) => {
+  const severityInfo = getSeverityAccessibilityInfo(severity);
+  const { icon, label, colorClass } = severityInfo;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${colorClass}`}
+      role="img"
+      aria-label={label}
+    >
+      <span aria-hidden="true">{icon}</span>
+      <span>{label}</span>
+    </span>
+  );
+});
+
+// カテゴリタグコンポーネント（メモ化）
+const CategoryTag = React.memo(({ category }: { category: IssueCategory }) => {
+  const categoryInfo = getCategoryAccessibilityInfo(category);
+  const { label } = categoryInfo;
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800"
+      role="img"
+      aria-label={label}
+    >
+      <span>{label}</span>
+    </span>
+  );
+});
+
+type IssueItemProps = {
+  issue: Issue;
+  index: number;
+  visibleStart: number;
+  itemHeight: number;
+  isSelected: boolean;
+  onSelect: (issueId: string) => void;
+  onKeyDown: (e: React.KeyboardEvent, issueId: string) => void;
+};
+
+// 問題アイテムコンポーネント（メモ化）
+const IssueItem = React.memo(({ 
+  issue, 
+  index, 
+  visibleStart, 
+  itemHeight, 
+  isSelected, 
+  onSelect, 
+  onKeyDown 
+}: IssueItemProps) => {
+  const actualIndex = visibleStart + index;
+
+  return (
+    <li
+      key={issue.id}
+      tabIndex={0}
+      className={`p-3 border-b border-slate-200 cursor-pointer transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset ${
+        isSelected ? 'bg-blue-50 border-blue-200' : ''
+      } ${getFocusIndicatorClasses()}`}
+      onClick={() => onSelect(issue.id)}
+      onKeyDown={(e) => onKeyDown(e, issue.id)}
+      aria-label={`問題 ${actualIndex + 1}: ${issue.message}`}
+      aria-current={isSelected ? 'true' : undefined}
+      style={{ height: itemHeight }}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <SeverityBadge severity={issue.severity} />
+            <CategoryTag category={issue.category} />
+            <span className="text-xs text-slate-500">
+              {issue.range.start}-{issue.range.end}
+            </span>
+          </div>
+          <p className="text-sm text-slate-900 line-clamp-2">
+            {issue.message}
+          </p>
+          {issue.suggestions && issue.suggestions.length > 0 && (
+            <p className="text-xs text-slate-600 mt-1">
+              推奨: {issue.suggestions[0].text ?? issue.suggestions[0]}
+            </p>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+});
+
 export default function VirtualizedIssueList({ 
   height = 400, 
   itemHeight = 80 
@@ -87,77 +176,7 @@ export default function VirtualizedIssueList({
     }
   }, [handleIssueSelect]);
 
-  // 重要度バッジコンポーネント
-  const SeverityBadge = ({ severity }: { severity: IssueSeverity }) => {
-    const severityInfo = getSeverityAccessibilityInfo(severity);
-    const { icon, label, colorClass } = severityInfo;
-    return (
-      <span
-        className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${colorClass}`}
-        role="img"
-        aria-label={label}
-      >
-        <span aria-hidden="true">{icon}</span>
-        <span>{label}</span>
-      </span>
-    );
-  };
-
-  // カテゴリタグコンポーネント
-  const CategoryTag = ({ category }: { category: IssueCategory }) => {
-    const categoryInfo = getCategoryAccessibilityInfo(category);
-    const { label } = categoryInfo;
-    return (
-      <span
-        className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800"
-        role="img"
-        aria-label={label}
-      >
-        <span>{label}</span>
-      </span>
-    );
-  };
-
-  // 問題アイテムコンポーネント
-  const IssueItem = ({ issue, index }: { issue: any; index: number }) => {
-    const isSelected = selectedIssue?.id === issue.id;
-    const actualIndex = visibleStart + index;
-
-    return (
-      <li
-        key={issue.id}
-        tabIndex={0}
-        className={`p-3 border-b border-slate-200 cursor-pointer transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset ${
-          isSelected ? 'bg-blue-50 border-blue-200' : ''
-        } ${getFocusIndicatorClasses()}`}
-        onClick={() => handleIssueSelect(issue.id)}
-        onKeyDown={(e) => handleKeyDown(e, issue.id)}
-        aria-label={`問題 ${actualIndex + 1}: ${issue.message}`}
-        aria-current={isSelected ? 'true' : undefined}
-        style={{ height: itemHeight }}
-      >
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <SeverityBadge severity={issue.severity} />
-              <CategoryTag category={issue.category} />
-              <span className="text-xs text-slate-500">
-                {issue.range.start}-{issue.range.end}
-              </span>
-            </div>
-            <p className="text-sm text-slate-900 line-clamp-2">
-              {issue.message}
-            </p>
-            {issue.suggestions && issue.suggestions.length > 0 && (
-              <p className="text-xs text-slate-600 mt-1">
-                推奨: {issue.suggestions[0]}
-              </p>
-            )}
-          </div>
-        </div>
-      </li>
-    );
-  };
+  // メモ: アイテム描画はトップレベルのメモ化コンポーネントを使用
 
   return (
     <div className="flex flex-col h-full">
@@ -265,7 +284,16 @@ export default function VirtualizedIssueList({
             style={{ transform: `translateY(${offsetY}px)` }}
           >
             {visibleItems.map((issue, index) => (
-              <IssueItem key={issue.id} issue={issue} index={index} />
+              <IssueItem
+                key={issue.id}
+                issue={issue as Issue}
+                index={index}
+                visibleStart={visibleStart}
+                itemHeight={itemHeight}
+                isSelected={selectedIssue?.id === issue.id}
+                onSelect={handleIssueSelect}
+                onKeyDown={handleKeyDown}
+              />
             ))}
           </ul>
         </div>

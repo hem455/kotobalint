@@ -34,7 +34,7 @@ export class KeyboardNavigationManager {
    */
   registerFocusableElements(elements: HTMLElement[]): void {
     this.focusableElements = elements.filter(el => 
-      el && !el.disabled && !el.hidden && this.isFocusable(el)
+      el && !el.hidden && !this.isDisabled(el) && this.isFocusable(el)
     );
   }
 
@@ -100,6 +100,11 @@ export class KeyboardNavigationManager {
    * キーダウンハンドラー
    */
   private handleKeyDown(event: KeyboardEvent): void {
+    // テキスト編集要素ではブラウザの標準動作を保持
+    if (this.isTextEditableElement(event.target as HTMLElement)) {
+      return;
+    }
+
     // ショートカットキーの処理
     const shortcutKey = this.getShortcutKey({
       key: event.key,
@@ -159,6 +164,50 @@ export class KeyboardNavigationManager {
   }
 
   /**
+   * 要素がテキスト編集要素かチェック
+   */
+  private isTextEditableElement(element: HTMLElement | null): boolean {
+    if (!element) return false;
+
+    const tagName = element.tagName.toLowerCase();
+    
+    // contenteditable要素
+    if (element.isContentEditable) {
+      return true;
+    }
+    
+    // textarea要素
+    if (tagName === 'textarea') {
+      return true;
+    }
+    
+    // input要素（テキスト系）
+    if (tagName === 'input') {
+      const inputType = (element as HTMLInputElement).type?.toLowerCase();
+      const textInputTypes = ['text', 'search', 'email', 'url', 'tel', 'password'];
+      return textInputTypes.includes(inputType);
+    }
+    
+    return false;
+  }
+
+  /**
+   * 要素が無効化されているかチェック（型安全）
+   */
+  private isDisabled(element: HTMLElement): boolean {
+    // フォームコントロール要素のみdisabledプロパティを持つ
+    if (element instanceof HTMLButtonElement ||
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLSelectElement ||
+        element instanceof HTMLTextAreaElement) {
+      return element.disabled;
+    }
+    
+    // その他の要素は無効化されていないとみなす
+    return false;
+  }
+
+  /**
    * 要素がフォーカス可能かチェック
    */
   private isFocusable(element: HTMLElement): boolean {
@@ -193,7 +242,7 @@ export class KeyboardNavigationManager {
   }
 }
 
-// デフォルトのキーボードショートカット
+// デフォルトのキーボードショートカット（ブラウザ/OS標準と競合しない組み合わせ）
 export const DEFAULT_SHORTCUTS: Omit<KeyboardShortcut, 'action'>[] = [
   {
     key: 'Enter',
@@ -203,6 +252,7 @@ export const DEFAULT_SHORTCUTS: Omit<KeyboardShortcut, 'action'>[] = [
   {
     key: 's',
     ctrlKey: true,
+    shiftKey: true,
     description: '設定を開く',
   },
   {
@@ -212,21 +262,24 @@ export const DEFAULT_SHORTCUTS: Omit<KeyboardShortcut, 'action'>[] = [
   {
     key: 'f',
     ctrlKey: true,
+    shiftKey: true,
     description: 'フィルターにフォーカス',
   },
   {
     key: 'a',
-    ctrlKey: true,
+    altKey: true,
     description: 'すべて選択',
   },
   {
     key: 'z',
     ctrlKey: true,
+    shiftKey: true,
     description: '元に戻す',
   },
   {
     key: 'y',
     ctrlKey: true,
+    shiftKey: true,
     description: 'やり直し',
   },
 ];

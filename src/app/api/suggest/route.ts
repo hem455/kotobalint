@@ -47,7 +47,17 @@ function parseLLMResponse(response: string, originalText: string): any[] {
       }
     }
     
-    const parsed = JSON.parse(jsonString);
+    let parsed: any;
+    try {
+      parsed = JSON.parse(jsonString);
+    } catch (parseError) {
+      console.warn('JSON parse error:', {
+        error: parseError instanceof Error ? parseError.message : 'Unknown parse error',
+        jsonPreview: jsonString.substring(0, 200) + (jsonString.length > 200 ? '...' : ''),
+        jsonLength: jsonString.length
+      });
+      return [];
+    }
     
     if (!parsed.issues || !Array.isArray(parsed.issues)) {
       console.warn('LLM レスポンスに issues 配列がありません');
@@ -102,11 +112,8 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
     }
 
     // 環境変数から LLM 設定を構築（デフォルトは Gemini 2.5 Flash）
-    let envProvider = (process.env.LLM_PROVIDER as LlmProvider) || 'gemini';
-    if (!(['gemini', 'ollama', 'openai_compat'] as LlmProvider[]).includes(envProvider)) {
-      envProvider = 'gemini';
-    }
-    const rawEnvModel = process.env.LLM_MODEL;
+    // Gemini固定
+    const envProvider: LlmProvider = 'gemini';    const rawEnvModel = process.env.LLM_MODEL;
     const defaultModel = (DEFAULT_LLM_SETTINGS[envProvider].model as LlmModel) || 'gemini-2.5-flash';
     const envModel: LlmModel = (rawEnvModel && (AVAILABLE_MODELS[envProvider] as LlmModel[]).includes(rawEnvModel as LlmModel))
       ? (rawEnvModel as LlmModel)
@@ -150,12 +157,18 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
     // シークレット検知（送信を拒否）
     if (containsSecret(fullText)) {
       const secretTypes = detectSecretType(fullText);
+      // 内部ログのみに詳細情報を記録（セキュリティのため）
+      console.warn('Secret detected in request:', { 
+        secretTypes, 
+        textLength: fullText.length,
+        timestamp: new Date().toISOString()
+      });
+      
       return NextResponse.json({
         success: false,
         error: {
           code: 'SECRET_DETECTED',
-          message: '入力内に機密らしき文字列が含まれます。修正して再送してください。',
-          details: `検出された機密情報: ${secretTypes.join(', ')}`
+          message: '入力内に機密らしき文字列が含まれます。修正して再送してください。'
         }
       }, { status: 400 });
     }
@@ -172,8 +185,11 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
     const sanitizedTextForPrompt = textForLLM
       .replace(/\\/g, "\\\\")
       .replace(/`/g, "\\`")
-      .replace(/\$/g, "\\$");
-
+      .replace(/\$/g, "\\$")
+      .replace(/\{/g, "\\{")
+      .replace(/\}/g, "\\}")
+      .replace(/\n{3,}/g, "\n\n") // 過度な改行を制限
+      .substring(0, 10000); // 最大文字数制限
     // プロンプトの構築
     const prompt = `あなたは日本語の校正専門家です。以下のテキストを校正し、改善提案を行ってください。
 
@@ -218,11 +234,8 @@ ${sanitizedTextForPrompt}
       }, { status: 400 });
     }
 
-    // プロバイダーはGemini固定
-    if (settings.provider !== 'gemini') {
-      settings.provider = 'gemini' as any;
-      settings.model = (settings.model || 'gemini-2.5-flash') as any;
-    }
+    // デフォルトモデルの適用
+    settings.model = settings.model || 'gemini-2.5-flash';
 
     // プロバイダー別の処理（Geminiのみ）
     let issues: any[] = [];
@@ -235,7 +248,7 @@ ${sanitizedTextForPrompt}
 
     const apiKey = settings.apiKey || process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      throw new Error("No Gemini API key configured");
+      throw new Error("Gemini API key not configured: set process.env.GEMINI_API_KEY or provide settings.apiKey");
     }
 
     console.log('Gemini API呼び出し開始:', { model: settings.model, textLength: textForLLM.length });

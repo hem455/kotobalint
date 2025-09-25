@@ -32,6 +32,11 @@ export function useDebouncedAnalysis(
     }, delay);
   }, [text, analyzeText, delay, enabled]);
 
+  // テキストや有効状態が変化したら自動で解析を実行
+  useEffect(() => {
+    debouncedAnalyze();
+  }, [text, enabled, debouncedAnalyze]);
+
   // クリーンアップ
   useEffect(() => {
     return () => {
