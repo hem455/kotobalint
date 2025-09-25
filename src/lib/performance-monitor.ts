@@ -31,7 +31,7 @@ export class PerformanceMonitor {
     ruleCount: number,
     issueCount: number,
     textLength: number,
-    cacheStats?: { rules: number; regex: number }
+    cacheStats?: { hits?: number; misses?: number; rules?: number; regex?: number }
   ): PerformanceMetrics {
     const analysisTime = performance.now() - startTime;
     const memoryUsage = this.getMemoryUsage();
@@ -65,12 +65,12 @@ export class PerformanceMonitor {
    * キャッシュヒット率を計算
    */
   private calculateCacheHitRate(cacheStats?: { 
-    hits: number; 
-    misses: number; 
+    hits?: number; 
+    misses?: number; 
     rules?: number; 
     regex?: number 
   }): number {
-    if (!cacheStats || !('hits' in cacheStats) || !('misses' in cacheStats)) return 0;
+    if (!cacheStats || typeof cacheStats.hits !== 'number' || typeof cacheStats.misses !== 'number') return 0;
     const totalAccess = cacheStats.hits + cacheStats.misses;
     return totalAccess > 0 ? cacheStats.hits / totalAccess : 0;
   }
