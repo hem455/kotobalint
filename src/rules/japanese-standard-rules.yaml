@@ -12,15 +12,15 @@ rules:
   - id: "grammar.ra_nuki"
     severity: "warn"
     category: "grammar"
-    pattern: "\\b(見|聞こ|思|思え|思わ|思える|思える|聞こ|聞こえ|聞こえる|出来|出|出せ|出せる|出せ|出せる|出せ|出せる|出せ|出せる)\\b"
+    pattern: "(見れる|食べれる|来れる|出れる)"
     message: "ら抜き言葉です。正しい活用形を使用してください"
     autoFix: false
     examples:
       - before: "見れる"
         after: "見られる"
-      - before: "出せる"
-        after: "出せられる"
-    enabled: true
+      - before: "出れる"
+        after: "出られる"
+    enabled: false
 
   # 文法エラー - 二重否定
   - id: "grammar.double_negation"
@@ -166,6 +166,19 @@ rules:
     examples:
       - before: "コンピュータ"
         after: "コンピューター"
+    enabled: true
+
+  # 文法 - ら抜き言葉（食べれる）
+  - id: "grammar.ranuki_tabereru"
+    severity: "warn"
+    category: "grammar"
+    pattern: "食べれる"
+    message: "「食べれる」は「ら抜き言葉」です。正しい形「食べられる」を検討してください"
+    autoFix: true
+    replacement: "食べられる"
+    examples:
+      - before: "食べれる"
+        after: "食べられる"
     enabled: true
 
   # リスク表現 - 断定的表現

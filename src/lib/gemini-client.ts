@@ -246,7 +246,26 @@ ${text}
         const triggerMatched = typeof def.pattern === 'string'
           ? msg.includes(def.pattern)
           : def.pattern.test(msg);
-        if (!triggerMatched) continue;
+        // メッセージに合致しない場合でも、テキスト内に対象語があれば位置を返す（フォールバック）
+        if (!triggerMatched) {
+          // フォールバック: matchText をテキストから検索
+          if (typeof def.matchText === 'string') {
+            const idx = sourceText.indexOf(def.matchText);
+            if (idx !== -1) {
+              return { start: idx, end: idx + def.matchText.length };
+            }
+            continue;
+          } else {
+            def.matchText.lastIndex = 0;
+            const m2 = def.matchText.exec(sourceText);
+            if (m2 && typeof m2.index === 'number') {
+              const matched2 = m2[0] ?? '';
+              const s2 = m2.index;
+              return { start: s2, end: s2 + matched2.length };
+            }
+            continue;
+          }
+        }
 
         if (typeof def.matchText === 'string') {
           const idx = sourceText.indexOf(def.matchText);

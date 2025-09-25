@@ -6,7 +6,7 @@ export default function Home() {
 }
 
 export const metadata: Metadata = {
-  title: '日本語校正アプリ',
+  title: 'kotobalint',
   description: 'AIを活用した日本語テキスト校正・修正ツール。文法・スタイル・一貫性の問題を検出・修正します。',
 }
 

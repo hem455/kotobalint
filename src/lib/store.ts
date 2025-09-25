@@ -331,13 +331,29 @@ export const useAppStore = create<AppState & AppActions>()(
           const newText = text.slice(0, issue.range.start) + 
                          suggestion.text + 
                          text.slice(issue.range.end);
-          
+
           // テキストを更新
           set({ text: newText });
-          
-          // 該当する問題を削除
-          const remainingIssues = issues.filter(i => i.id !== issueId);
-          const augmentedRemaining = augmentIssuesWithContext(remainingIssues);
+
+          // 対象Issueは削除せず、適用した提案のみ除去して他の提案を保持
+          const updatedIssues = issues.map(i => {
+            if (i.id !== issueId) return i;
+            const remainingSuggestions = (i.suggestions || []).filter((_, idx) => idx !== suggestionIndex);
+            const newRangeEnd = i.range.start + suggestion.text.length;
+            return {
+              ...i,
+              suggestions: remainingSuggestions,
+              range: { start: i.range.start, end: newRangeEnd },
+              start: i.range.start,
+              end: newRangeEnd,
+              metadata: {
+                ...i.metadata,
+                originalText: suggestion.text
+              }
+            };
+          });
+
+          const augmentedRemaining = augmentIssuesWithContext(updatedIssues);
           set({ issues: augmentedRemaining });
           get().updateIssueStats();
 

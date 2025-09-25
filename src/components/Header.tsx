@@ -83,7 +83,7 @@ export default function Header() {
             <span className="text-white text-sm font-bold">校</span>
           </div>
           <div>
-            <h1 className="text-lg font-semibold">日本語校正アプリ</h1>
+            <h1 className="text-lg font-semibold">kotobalint</h1>
             <p className="text-xs text-slate-500">AI-powered Japanese proofreading</p>
           </div>
         </div>

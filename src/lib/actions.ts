@@ -49,7 +49,12 @@ export const useAnalysisActions = () => {
       };
 
       const response = await apiClient.lintText(request);
-      setIssues(response.issues);
+      // 既存のLLM由来の問題は保持し、ルールベース結果で上書きしない
+      const existingIssues = useAppStore.getState().issues || [];
+      const llmIssues = existingIssues.filter((i) => i.source === 'llm');
+      // ルールベース結果（source!== 'llm' とみなす）を優先
+      const merged = [...response.issues, ...llmIssues];
+      setIssues(merged);
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '解析中にエラーが発生しました';
