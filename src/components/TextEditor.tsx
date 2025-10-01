@@ -154,7 +154,7 @@ export default function TextEditor() {
   // テキスト更新後にも一度同期（折返し再計算でスクロール量が変わることがある）
   useEffect(() => {
     syncScroll();
-  }, [text, showLineNumbers]);
+  }, [text]);
 
   // スクロールイベントのリスナーを追加（リアルタイム同期）
   useEffect(() => {
@@ -217,7 +217,7 @@ export default function TextEditor() {
     const lineHeight = 24; // leading-6 = 1.5rem = 24px
     const charWidth = 8; // 概算
     const padding = 16; // p-4 = 1rem = 16px
-    const lineNumberWidth = showLineNumbers ? 64 : 0; // pl-16 = 4rem = 64px
+    const lineNumberWidth = 0; // 行番号なし
     
     const lineIndex = Math.floor((clickY - padding) / lineHeight);
     const charIndex = Math.floor((clickX - padding - lineNumberWidth) / charWidth);
@@ -272,9 +272,7 @@ export default function TextEditor() {
           onChange={handleTextChange}
           onSelect={handleTextSelect}
           onClick={handleTextAreaClick}
-          className={`absolute inset-0 resize-none bg-transparent p-4 font-mono text-sm leading-6 caret-slate-900 text-slate-900 selection:bg-slate-200 ${getFocusIndicatorClasses()} ${
-            showLineNumbers ? 'pl-16' : ''
-          }`}
+          className={`absolute inset-0 resize-none bg-transparent p-4 font-mono text-sm leading-6 caret-slate-900 text-slate-900 selection:bg-slate-200 ${getFocusIndicatorClasses()}`}
           style={{ 
             tabSize: 4
           }}
