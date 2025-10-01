@@ -20,7 +20,7 @@ export async function runGemini({
   apiKey,
   model = "gemini-2.5-flash",
   text,
-  timeoutMs = 60000,
+  timeoutMs = 90000,
   thinkingBudget = 512,
   responseSchema,
 }: RunGeminiArgs): Promise<string> {
@@ -31,7 +31,10 @@ export async function runGemini({
   const ai = new GoogleGenerativeAI(apiKey);
 
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const timer = setTimeout(() => {
+    console.warn(`Gemini request timeout after ${timeoutMs}ms`);
+    ctrl.abort();
+  }, timeoutMs);
 
   try {
     const config: any = {};
@@ -49,12 +52,17 @@ export async function runGemini({
       generationConfig: config
     });
 
+    // signal のみを使用（timeout オプションとの競合を回避）
     const result = await modelInstance.generateContent(text, {
-      signal: ctrl.signal,
-      timeout: timeoutMs
+      signal: ctrl.signal
     });
 
     return result.response.text();
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Gemini API request timed out after ${timeoutMs}ms`);
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -76,9 +84,12 @@ export const issueSchema = {
           severity: { type: "string", enum: ["info", "warn", "error"] },
           message: { type: "string" },
           category: { type: "string", enum: ["style", "grammar", "honorific", "consistency", "risk"] },
-          start: { type: "integer" },
-          end: { type: "integer" },
-          range: {
+          // 位置決定用のフィールド（LLMはインデックスを返さない）
+          quote: { type: "string" },         // 問題の実体
+          before: { type: "string" },        // 直前の文脈(最大40文字)
+          after: { type: "string" },         // 直後の文脈(最大40文字)
+          nth: { type: "integer" },          // 同一quoteが複数ある場合、n番目(1始まり)
+          range: {                           // （任意）あれば使うが、信用はしない
             type: "object",
             properties: {
               start: { type: "integer" },
@@ -100,17 +111,10 @@ export const issueSchema = {
             }
           }
         },
-        required: ["id", "severity", "category", "message", "range"],
+        required: ["id", "severity", "category", "message"],
         propertyOrdering: [
-          "id",
-          "ruleId",
-          "severity",
-          "category",
-          "message",
-          "start",
-          "end",
-          "range",
-          "suggestions"
+          "id", "ruleId", "severity", "category", "message",
+          "quote", "before", "after", "nth", "range", "suggestions"
         ]
       }
     }
@@ -120,13 +124,122 @@ export const issueSchema = {
 };
 
 /**
+ * テキスト正規化（改行統一 + NFKC正規化）
+ */
+function normalizeForMatch(s: string): string {
+  // 1) 改行は \n に統一
+  // 2) 互換正規化（全角/半角・類似文字の統一）
+  return s.replace(/\r\n?/g, '\n').normalize('NFKC');
+}
+
+/**
+ * グラフェム単位とUTF-16コードユニットのマッピング作成
+ */
+function buildIndexMaps(original: string) {
+  // Intl.Segmenter の型定義を追加
+  const Segmenter = (Intl as any).Segmenter;
+  if (!Segmenter) {
+    // フォールバック: 文字単位で処理
+    const normOriginal = normalizeForMatch(original);
+    const norm2cu: number[] = [];
+    for (let i = 0; i < normOriginal.length; i++) {
+      norm2cu[i] = Math.min(i, original.length - 1);
+    }
+    return { normOriginal, norm2cu };
+  }
+  
+  const seg = new Segmenter('ja', { granularity: 'grapheme' });
+  const graphemes = Array.from(seg.segment(original));
+  const g2cu: Array<{ start: number; end: number; text: string }> = [];
+  let cu = 0;
+  for (const g of graphemes) {
+    const t = (g as any).segment;
+    const start = cu;
+    const end = start + t.length; // UTF-16 code units
+    g2cu.push({ start, end, text: t });
+    cu = end;
+  }
+  
+  // 正規化テキストと、正規化→元のUTF-16 への逆引き表も用意
+  const normOriginal = normalizeForMatch(original);
+  // normIndex -> original UTF-16 のざっくりマップ（必要十分精度）
+  // 方針：元と正規化後を同じ順で走査して"おおむね"対応付け
+  const norm2cu: number[] = [];
+  let iOrig = 0;
+  let iNorm = 0;
+  while (iOrig < original.length && iNorm < normOriginal.length) {
+    norm2cu[iNorm] = iOrig;
+    // 1コードユニットずつ進める（NFKCで長さがズレる箇所は局所的に不一致だが、before/quote/after 検索の境界で十分）
+    iOrig++; iNorm++;
+  }
+  return { normOriginal, norm2cu };
+}
+
+/**
+ * 正規表現の特殊文字をエスケープ
+ */
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * before/quote/after で一意に検索して位置を決定
+ */
+function findRangeByContext(
+  raw: string, 
+  before = '', 
+  quote = '', 
+  after = '', 
+  nth = 1
+): { start: number; end: number } | null {
+  const norm = normalizeForMatch(raw);
+  const pat = new RegExp(
+    `${escapeRe(before)}${escapeRe(quote)}${escapeRe(after)}`,
+    'g'
+  );
+  let match: RegExpExecArray | null;
+  let count = 0;
+  while ((match = pat.exec(norm)) !== null) {
+    count++;
+    if (count === (nth || 1)) {
+      const startNorm = match.index + before.length;
+      const endNorm = startNorm + quote.length;
+      // 正規化→元のUTF-16へ戻す
+      const { norm2cu } = buildIndexMaps(raw);
+      const startCU = norm2cu[startNorm] ?? 0;
+      const endCU = norm2cu[endNorm] ?? startCU + quote.length;
+      return { start: startCU, end: endCU };
+    }
+  }
+  
+  // 失敗時は quote 単体で nth 検索
+  if (quote) {
+    const q = new RegExp(escapeRe(quote), 'g');
+    let hit: RegExpExecArray | null;
+    let k = 0;
+    while ((hit = q.exec(norm)) !== null) {
+      k++;
+      if (k === (nth || 1)) {
+        const startNorm = hit.index;
+        const endNorm = startNorm + quote.length;
+        const { norm2cu } = buildIndexMaps(raw);
+        const startCU = norm2cu[startNorm] ?? 0;
+        const endCU = norm2cu[endNorm] ?? startCU + quote.length;
+        return { start: startCU, end: endCU };
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * 校正提案を生成（構造化出力版）
  */
 export async function generateProofreadingSuggestions({
   apiKey,
   model = "gemini-2.5-flash",
   text,
-  timeoutMs = 30000,
+  timeoutMs = 60000,
   thinkingBudget = 512,
 }: {
   apiKey: string;
@@ -168,10 +281,10 @@ ${text}
       "severity": "info",
       "category": "style",
       "message": "問題の説明",
-      "range": {
-        "start": 0,
-        "end": 5
-      },
+      "quote": "問題となる箇所そのもの",
+      "before": "前後文脈の直前(最大40文字)",
+      "after": "前後文脈の直後(最大40文字)",
+      "nth": 1,
       "suggestions": [
         {
           "text": "修正案",
@@ -185,11 +298,13 @@ ${text}
 }
 
 注意事項:
-- 必ずJSON形式で応答してください
+- インデックス(start/end)は返さないでください（位置は私たちが決定します）
+- quote: 問題となる箇所の実際の文字列を原文からそのまま抜粋してください
+- before: quoteの直前の文脈を最大40文字で抜粋してください
+- after: quoteの直後の文脈を最大40文字で抜粋してください
+- nth: 同じquoteが複数ある場合、何番目かを指定してください（1始まり）
 - 断定的でない表現を使用してください（「〜かもしれません」「〜を検討してください」など）
 - 最大3個の提案まで生成してください
-- 問題の範囲（start, end）は元のテキスト内の文字位置で指定してください（JavaScript文字列の0ベースインデックス）
-- 文字位置は正確に計算してください。テキストの最初の文字は0、次の文字は1、というように数えてください
 - 重要度は適切に設定してください（info: 軽微、warn: 注意、error: 重要）
 - 問題がない場合は空の配列を返してください: {"issues": []}`;
 
@@ -219,141 +334,56 @@ ${text}
 
     const parsed = JSON.parse(cleanResponse);
     
-    // 各issueにsourceフィールドを追加し、位置を正規表現で修正
-    // 追加: 汎用的な校正パターンと位置検出ロジック
-    const CORRECTION_PATTERNS: Array<{
-      pattern: RegExp | string; // issue.message に対する判定
-      matchText: RegExp | string; // 原文 text から位置を取る対象
-      suggestion?: string;
-    }> = [
-      {
-        // 表記ゆれ: コンピュータ/コンピューター
-        pattern: /(コンピュータ|コンピューター)/,
-        matchText: /(コンピュータ|コンピューター)/g,
-        suggestion: 'コンピューター'
-      },
-      {
-        // ら抜き言葉: 食べれる
-        pattern: /(食べれる|ら抜き)/,
-        matchText: /食べれる/g,
-        suggestion: '食べられる'
-      },
-    ];
-
-    const findTextPosition = (
-      sourceText: string,
-      issueLike: { message?: string; range?: { start?: number; end?: number } }
-    ): { start: number; end: number } | null => {
-      const msg = issueLike?.message || '';
-      const hintStart = typeof issueLike?.range?.start === 'number' ? issueLike.range.start : undefined;
-      const windowSize = 50;
-      for (const def of CORRECTION_PATTERNS) {
-        const triggerMatched = typeof def.pattern === 'string'
-          ? msg.includes(def.pattern)
-          : def.pattern.test(msg);
-        // まずは LLM が返した範囲付近で検索（ズレ補正）
-        if (typeof hintStart === 'number') {
-          const start = Math.max(0, hintStart - windowSize);
-          const end = Math.min(sourceText.length, hintStart + windowSize);
-          const windowText = sourceText.slice(start, end);
-          if (typeof def.matchText === 'string') {
-            const localIdx = windowText.indexOf(def.matchText);
-            if (localIdx !== -1) {
-              const abs = start + localIdx;
-              return { start: abs, end: abs + def.matchText.length };
-            }
-          } else {
-            def.matchText.lastIndex = 0;
-            const mWin = def.matchText.exec(windowText);
-            if (mWin && typeof mWin.index === 'number') {
-              const matched = mWin[0] ?? '';
-              const abs = start + mWin.index;
-              return { start: abs, end: abs + matched.length };
-            }
-          }
-        }
-
-        // メッセージ一致の有無に関わらず、全体検索でフォールバック
-        if (!triggerMatched) {
-          // 続行して全体検索へ
-        }
-
-        if (typeof def.matchText === 'string') {
-          const idx = sourceText.indexOf(def.matchText);
-          if (idx !== -1) {
-            return { start: idx, end: idx + def.matchText.length };
-          }
-        } else {
-          def.matchText.lastIndex = 0; // 念のため先頭から
-          const m = def.matchText.exec(sourceText);
-          if (m && typeof m.index === 'number') {
-            const matched = m[0] ?? '';
-            const s = m.index;
-            return { start: s, end: s + matched.length };
-          }
-        }
-      }
-      return null;
-    };
-
-    const issuesWithSource = (parsed.issues || []).map((issue: any) => {
+    // 各issueにsourceフィールドを追加し、文脈検索で位置を決定
+    const issuesWithSource = (parsed.issues || []).map((issue: any, idx: number) => {
       const {
         suggestions: rawSuggestions,
         suggestion: legacySuggestion,
+        quote = '',
+        before = '',
+        after = '',
+        nth = 1,
         ...rest
       } = issue || {};
-      // 問題のテキストから実際の位置を検索
-      const initialRange = rest.range || {};
-      let correctedStart = typeof initialRange.start === 'number' ? initialRange.start : issue.start;
-      let correctedEnd = typeof initialRange.end === 'number' ? initialRange.end : issue.end;
 
-      // メッセージから問題のキーワードを抽出して位置を修正
-      const message = rest.message || '';
-
-      // 汎用パターンで検索して位置を補正
-      const found = findTextPosition(text, { message, range: initialRange });
-      if (found) {
-        correctedStart = found.start;
-        correctedEnd = found.end;
+      // 位置は LLM ではなくローカルで決定
+      let start = 0, end = 1;
+      const located = findRangeByContext(text, before, quote, after, nth);
+      if (located) {
+        start = located.start;
+        end = Math.max(located.end, start + 1);
+      } else if (typeof rest.range?.start === 'number' && typeof rest.range?.end === 'number') {
+        // 最後の保険：LLM 提示の index（信用度低）を使用
+        start = Math.max(0, rest.range.start);
+        end = Math.max(start + 1, rest.range.end);
       }
-
-      const safeStart = typeof correctedStart === 'number' && correctedStart >= 0 ? correctedStart : 0;
-      const safeEnd = typeof correctedEnd === 'number' && correctedEnd > safeStart ? correctedEnd : safeStart + 1;
-
       const normalizedSuggestions = Array.isArray(rawSuggestions)
-        ? rawSuggestions.map((suggestion: any) => ({
-            text: suggestion?.text ?? '',
-            rationale: suggestion?.rationale ?? 'LLMによる提案',
-            confidence: typeof suggestion?.confidence === 'number'
-              ? Math.max(0, Math.min(1, suggestion.confidence))
+        ? rawSuggestions.map((s: any) => ({
+            text: s?.text ?? '',
+            rationale: s?.rationale ?? 'LLMによる提案',
+            confidence: typeof s?.confidence === 'number'
+              ? Math.max(0, Math.min(1, s.confidence))
               : 0.5,
-            isPreferred: Boolean(suggestion?.isPreferred)
+            isPreferred: Boolean(s?.isPreferred)
           }))
         : legacySuggestion
-          ? [{
-              text: legacySuggestion,
-              rationale: 'LLMによる提案',
-              confidence: 0.5,
-              isPreferred: false
-            }]
+          ? [{ text: legacySuggestion, rationale: 'LLMによる提案', confidence: 0.5, isPreferred: false }]
           : [];
 
-      const normalizedCategory = ['style', 'grammar', 'honorific', 'consistency', 'risk'].includes(rest.category)
-        ? rest.category
-        : 'style';
-
-      const normalizedSeverity = ['info', 'warn', 'error'].includes(rest.severity)
-        ? rest.severity
-        : 'info';
+      const normalizedCategory = ['style','grammar','honorific','consistency','risk'].includes(rest.category)
+        ? rest.category : 'style';
+      const normalizedSeverity = ['info','warn','error'].includes(rest.severity)
+        ? rest.severity : 'info';
 
       return {
         ...rest,
-        start: safeStart,
-        end: safeEnd,
-        range: {
-          start: safeStart,
-          end: safeEnd
-        },
+        start,
+        end,
+        range: { start, end },
+        quote,
+        before,
+        after,
+        nth,
         source: "llm" as const,
         category: normalizedCategory,
         severity: normalizedSeverity,
@@ -361,9 +391,7 @@ ${text}
         metadata: {
           ...rest.metadata,
           llmGenerated: true,
-          confidence: typeof rest.confidence === 'number'
-            ? Math.max(0, Math.min(1, rest.confidence))
-            : normalizedSuggestions[0]?.confidence ?? 0.5
+          anchorStrategy: 'context-search'
         }
       };
     });

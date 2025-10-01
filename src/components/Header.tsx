@@ -11,6 +11,7 @@ import { getFocusIndicatorClasses, getAccessibleAnimationClasses } from '@/lib/a
  */
 export default function Header() {
   const {
+    text,
     analyzeText,
     generateLLMSuggestions,
     applyAllAutoFixesToIssues,
@@ -27,8 +28,10 @@ export default function Header() {
   }, [analyzeText]);
 
   const handleLLMSuggestions = useCallback(() => {
+    console.log('[DEBUG] AI提案ボタンクリック - text length:', text?.length || 0);
+    console.log('[DEBUG] text preview:', text?.slice(0, 100) || '(empty)');
     generateLLMSuggestions('business');
-  }, [generateLLMSuggestions]);
+  }, [text, generateLLMSuggestions]);
 
   const handleFixAll = useCallback(() => {
     applyAllAutoFixesToIssues();

@@ -44,7 +44,10 @@ export default function TextEditor() {
 
   // フィルタリングされた問題を取得
   const filteredIssues = useMemo(() => {
-    return issues.filter(issue => {
+    console.log('🔍 Debug - issues:', issues);
+    console.log('🔍 Debug - filters:', filters);
+    
+    const filtered = issues.filter(issue => {
       if (filters.source && filters.source.length > 0) {
         if (!filters.source.includes(issue.source)) return false;
       }
@@ -56,17 +59,32 @@ export default function TextEditor() {
       }
       return true;
     });
+    
+    console.log('🔍 Debug - filteredIssues:', filtered);
+    return filtered;
   }, [issues, filters]);
 
   // ハイライト用のHTMLを生成
   const highlightedHTML = useMemo(() => {
+    console.log('🔍 Debug - filteredIssues:', filteredIssues);
+    console.log('🔍 Debug - text length:', text.length);
+    
     const strength: Record<string, number> = { info: 1, warn: 2, error: 3 };
     const cover: (string | null)[] = new Array(text.length).fill(null);
 
     // 問題の範囲をカバレッジ配列にマーク
-    filteredIssues.forEach(issue => {
+    filteredIssues.forEach((issue, index) => {
+      console.log(`🔍 Debug - Issue ${index}:`, {
+        id: issue.id,
+        severity: issue.severity,
+        range: issue.range,
+        message: issue.message
+      });
+      
       const safeStart = Math.max(issue.range.start, 0);
       const safeEnd = Math.min(Math.max(issue.range.end, 0), text.length);
+      
+      console.log(`🔍 Debug - Safe range: ${safeStart} - ${safeEnd}`);
       
       if (safeStart < safeEnd) {
         for (let p = safeStart; p < safeEnd; p++) {
@@ -117,10 +135,29 @@ export default function TextEditor() {
     return html;
   }, [text, filteredIssues, selectedIssue]);
 
-  // 行番号を生成
+  // 行番号を生成（改行と折り返しを考慮）
   const lineNumbers = useMemo(() => {
     const lines = text.split('\n');
-    return lines.map((_, index) => index + 1);
+    const lineHeight = 24; // leading-6 = 1.5rem = 24px
+    const containerWidth = 800; // 概算のコンテナ幅
+    const charWidth = 8; // 概算の文字幅
+    const maxCharsPerLine = Math.floor((containerWidth - 64) / charWidth); // 行番号分を除く
+    
+    const result: number[] = [];
+    lines.forEach((line, lineIndex) => {
+      if (line.length <= maxCharsPerLine) {
+        result.push(lineIndex + 1);
+      } else {
+        // 長い行は複数行に分割
+        const wrappedLines = Math.ceil(line.length / maxCharsPerLine);
+        for (let i = 0; i < wrappedLines; i++) {
+          result.push(lineIndex + 1);
+        }
+      }
+    });
+    
+    // 最低1行は表示
+    return result.length > 0 ? result : [1];
   }, [text]);
 
   // スクロール同期（改良版）
@@ -260,8 +297,8 @@ export default function TextEditor() {
         {showLineNumbers && (
           <div className="absolute left-0 top-0 z-10 h-full w-12 bg-slate-50 border-r border-slate-200" aria-hidden="true">
             <div className="p-4 font-mono text-xs text-slate-500 leading-6">
-              {lineNumbers.map(num => (
-                <div key={num} className="h-6 text-right">
+              {lineNumbers.map((num, idx) => (
+                <div key={idx} className="h-6 text-right">
                   {num}
                 </div>
               ))}
@@ -278,7 +315,7 @@ export default function TextEditor() {
           }`}
           style={{ 
             tabSize: 4,
-            pointerEvents: 'none' // デフォルトでは無効
+            pointerEvents: 'auto' // ハイライトをクリック可能にする
           }}
           dangerouslySetInnerHTML={{ __html: highlightedHTML }}
           onClick={handleHighlightClick}

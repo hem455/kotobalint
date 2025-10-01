@@ -131,7 +131,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
       model: envModel,
       baseUrl: envBaseUrl,
       apiKey: envApiKey,
-      timeoutMs: Number.isFinite(envTimeoutMs) ? envTimeoutMs : 30000,
+      timeoutMs: Number.isFinite(envTimeoutMs) ? envTimeoutMs : 90000,
       maxSuggestions: Number.isFinite(envMaxSuggestions) ? envMaxSuggestions : 3,
       thinkingBudget: Number.isFinite(envThinkingBudget) ? envThinkingBudget : 512
     };
