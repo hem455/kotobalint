@@ -1,0 +1,63 @@
+# kotobalint ルール定義テンプレート
+#
+# このYAMLは `src/rules/*.yaml` に置く実運用ルールと同じ構造です。
+# `id` を一意にし、`severity`/`category`/`pattern`/`message` を必須で記述してください。
+# `autoFix: true` と `replacement` を指定すると、通常解析の提案で「適用」できます。
+
+rules:
+  # 例1: 文字列パターン（単純一致）
+  - id: "style.katakana_long_vowel"
+    severity: "warn"              # info | warn | error
+    category: "consistency"       # style | grammar | honorific | consistency | risk
+    pattern: "コンピュータ"        # 文字列そのものに一致
+    message: "外来語の長音表記を統一してください（例: コンピューター）"
+    autoFix: true                  # 自動修正の有無
+    replacement: "コンピューター" # 自動修正の置換文字列
+    examples:
+      - before: "このコンピュータは高速です。"
+        after:  "このコンピューターは高速です。"
+    enabled: true
+
+  # 例2: 正規表現パターン（グループを使った置換）
+  - id: "grammar.ra_nuki_tabereru"
+    severity: "warn"
+    category: "grammar"
+    # 正規表現はスラッシュ不要。`$1` のようにキャプチャ参照が可能です
+    pattern: "食べれる"
+    message: "「食べれる」はら抜き言葉です。『食べられる』を検討してください。"
+    autoFix: true
+    replacement: "食べられる"
+    examples:
+      - before: "早ければ食べれると思う。"
+        after:  "早ければ食べられると思う。"
+    enabled: true
+
+  # 例3: 余計なスペース/連続空白の削減（正規表現）
+  - id: "style.multiple_spaces"
+    severity: "info"
+    category: "style"
+    pattern: "\s{2,}"               # 連続空白
+    message: "連続する空白があります。1つにまとめてください。"
+    autoFix: true
+    replacement: " "
+    examples:
+      - before: "これは  サンプルです。"
+        after:  "これは サンプルです。"
+    enabled: true
+
+  # 例4: 丁寧語の統一（ルール例、適宜メッセージを調整）
+  - id: "honorific.too_casual"
+    severity: "info"
+    category: "honorific"
+    pattern: "やばい"
+    message: "カジュアルな表現が含まれています。文体に応じて言い換えを検討してください。"
+    autoFix: false                 # 提案のみ（自動適用しない）
+    enabled: true
+
+# メモ:
+# - `pattern` は文字列または正規表現（文字列で正規表現を書きます）。
+# - `replacement` にキャプチャ `$1` `$2` ... を使う場合、`pattern` に対応するグループを定義してください。
+# - `enabled: false` にすれば一時的に無効化できます。
+# - 実運用ルールは `src/rules/japanese-standard-rules.yaml` を参照してください。
+
+

@@ -40,7 +40,6 @@ export default function TextEditor() {
 
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
-  const [showLineNumbers, setShowLineNumbers] = useState(true);
 
   // フィルタリングされた問題を取得
   const filteredIssues = useMemo(() => {
@@ -135,30 +134,6 @@ export default function TextEditor() {
     return html;
   }, [text, filteredIssues, selectedIssue]);
 
-  // 行番号を生成（改行と折り返しを考慮）
-  const lineNumbers = useMemo(() => {
-    const lines = text.split('\n');
-    const lineHeight = 24; // leading-6 = 1.5rem = 24px
-    const containerWidth = 800; // 概算のコンテナ幅
-    const charWidth = 8; // 概算の文字幅
-    const maxCharsPerLine = Math.floor((containerWidth - 64) / charWidth); // 行番号分を除く
-    
-    const result: number[] = [];
-    lines.forEach((line, lineIndex) => {
-      if (line.length <= maxCharsPerLine) {
-        result.push(lineIndex + 1);
-      } else {
-        // 長い行は複数行に分割
-        const wrappedLines = Math.ceil(line.length / maxCharsPerLine);
-        for (let i = 0; i < wrappedLines; i++) {
-          result.push(lineIndex + 1);
-        }
-      }
-    });
-    
-    // 最低1行は表示
-    return result.length > 0 ? result : [1];
-  }, [text]);
 
   // スクロール同期（改良版）
   const syncScroll = () => {
@@ -265,27 +240,11 @@ export default function TextEditor() {
     }
   };
 
-  // 行番号の表示/非表示切り替え
-  const toggleLineNumbers = () => {
-    setShowLineNumbers(!showLineNumbers);
-  };
 
   return (
     <div className="relative">
       {/* ツールバー */}
-      <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <label className="inline-flex items-center gap-1 text-xs text-slate-600">
-            <input
-              type="checkbox"
-              checked={showLineNumbers}
-              onChange={toggleLineNumbers}
-              className={`rounded border-gray-300 text-blue-600 ${getFocusIndicatorClasses()}`}
-              aria-describedby="line-numbers-description"
-            />
-            <span id="line-numbers-description">行番号</span>
-          </label>
-        </div>
+      <div className="mb-2 flex items-center justify-end">
         <div className="text-xs text-slate-500" role="status" aria-live="polite">
           {text.length} 文字
         </div>
@@ -293,26 +252,11 @@ export default function TextEditor() {
 
       {/* エディターコンテナ */}
       <div className="relative h-[460px] overflow-auto rounded-xl border bg-white" role="textbox" aria-label="テキストエディター">
-        {/* 行番号 */}
-        {showLineNumbers && (
-          <div className="absolute left-0 top-0 z-10 h-full w-12 bg-slate-50 border-r border-slate-200" aria-hidden="true">
-            <div className="p-4 font-mono text-xs text-slate-500 leading-6">
-              {lineNumbers.map((num, idx) => (
-                <div key={idx} className="h-6 text-right">
-                  {num}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* ハイライトオーバーレイ */}
         <div
           ref={overlayRef}
           aria-hidden
-          className={`absolute inset-0 whitespace-pre-wrap p-4 font-mono text-sm leading-6 text-transparent ${
-            showLineNumbers ? 'pl-16' : ''
-          }`}
+          className="absolute inset-0 whitespace-pre-wrap p-4 font-mono text-sm leading-6 text-transparent"
           style={{ 
             tabSize: 4,
             pointerEvents: 'auto' // ハイライトをクリック可能にする
