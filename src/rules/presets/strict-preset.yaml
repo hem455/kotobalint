@@ -1,0 +1,199 @@
+meta:
+  id: "preset-strict-v1.0.0"
+  version: "1.0.0"
+  locale: "ja-JP"
+  name: "Strictプリセット（最終校正向け）"
+  description: "32ルール。最も厳格な校正。処理時間3-5秒。出版・公式文書向け。"
+  basedOn: "textlint-rule-preset-ja-technical-writing + JTF style"
+  performance: "thorough"
+  targetUseCase: "出版物、公式文書、プレスリリース、最終校正"
+  includesPresets: ["standard-preset"]
+
+rules:
+  # === Standard プリセット全18ルールを含む ===
+
+  # 19. より厳格な文長制限（100文字）
+  - id: "style.long_sentence_strict"
+    severity: "warn"
+    category: "style"
+    pattern: "[^。]{101,}"
+    message: "文が長すぎます（100文字超）。技術文書では分割を推奨します"
+    autoFix: false
+    enabled: true
+    source: "textlint:sentence-length"
+    examples:
+      - before: "（101文字以上の文）"
+        after: "（2文に分割）"
+
+  # 20. より厳格な読点制限（3個以上）
+  - id: "style.max_reading_points_strict"
+    severity: "warn"
+    category: "style"
+    pattern: "([^。]*?、[^。]*?、[^。]*?、)"
+    message: "読点が3個以上あります。文を分割してください"
+    autoFix: false
+    enabled: true
+    source: "textlint:max-ten"
+    examples:
+      - before: "A、B、C、Dです。"
+        after: "A、Bです。C、Dです。"
+
+  # 21. カタカナ長音表記の統一（コンピュータ→コンピューター）
+  - id: "consistency.katakana_long_vowel_computer"
+    severity: "info"
+    category: "consistency"
+    pattern: "コンピュータ(?!ー)"
+    message: "外来語の長音表記を統一してください（コンピューター）"
+    autoFix: true
+    replacement: "コンピューター"
+    enabled: true
+    source: "textlint:ja-technical-writing"
+    examples:
+      - before: "コンピュータ"
+        after: "コンピューター"
+
+  - id: "consistency.katakana_long_vowel_user"
+    severity: "info"
+    category: "consistency"
+    pattern: "ユーザ(?!ー)"
+    message: "外来語の長音表記を統一してください（ユーザー）"
+    autoFix: true
+    replacement: "ユーザー"
+    enabled: true
+    source: "textlint:ja-technical-writing"
+    examples:
+      - before: "ユーザ"
+        after: "ユーザー"
+
+  # 23. 「〜の方」の冗長表現
+  - id: "style.redundant_no_hou"
+    severity: "info"
+    category: "style"
+    pattern: "([ぁ-ん]{2,})の方([がをに])"
+    message: "「〜の方」は冗長な表現です。削除を検討してください"
+    autoFix: false
+    enabled: true
+    source: "textlint:ja-no-redundant-expression"
+    examples:
+      - before: "こちらの方が"
+        after: "こちらが"
+
+  # 24. 「〜について」の冗長表現
+  - id: "style.redundant_nitsuite"
+    severity: "info"
+    category: "style"
+    pattern: "について(の|は)"
+    message: "「〜についての」は冗長です。「〜の」に簡略化できます"
+    autoFix: false
+    enabled: true
+    source: "textlint:ja-no-redundant-expression"
+    examples:
+      - before: "セキュリティについての方針"
+        after: "セキュリティの方針"
+
+  # 25. 「基本的に」などの無駄な副詞
+  - id: "style.useless_adverb"
+    severity: "info"
+    category: "style"
+    pattern: "(基本的に|一般的に|普通は|通常は|だいたい)"
+    message: "無駄な副詞です。削除しても意味が通じるか確認してください"
+    autoFix: false
+    enabled: true
+    source: "textlint:ja-no-weak-phrase"
+    examples:
+      - before: "基本的に動作します"
+        after: "動作します"
+
+  # 26. 半角カタカナの検出
+  - id: "consistency.half_width_katakana"
+    severity: "error"
+    category: "consistency"
+    pattern: "[ｦ-ﾟ]+"
+    message: "半角カタカナが使用されています。全角カタカナに変換してください"
+    autoFix: false
+    enabled: true
+    source: "textlint:no-hankaku-kana"
+    examples:
+      - before: "ｶﾀｶﾅ"
+        after: "カタカナ"
+
+  # 27. 不自然な括弧の使用
+  - id: "style.unnatural_parentheses"
+    severity: "info"
+    category: "style"
+    pattern: "\\(([^)]{1,3})\\)"
+    message: "短い括弧書きです。本文に統合できないか検討してください"
+    autoFix: false
+    enabled: true
+    source: "textlint:ja-no-abusage"
+    examples:
+      - before: "重要(※)な項目"
+        after: "重要な項目（※注釈は別に記載）"
+
+  # 28. 「〜たり〜たり」の不完全な使用
+  - id: "grammar.incomplete_tari"
+    severity: "warn"
+    category: "grammar"
+    pattern: "([ぁ-ん]{2,})たり([^。]{10,}?)([^たり]{2})[。、]"
+    message: "「〜たり」は2回以上使用してください（〜たり〜たり）"
+    autoFix: false
+    enabled: true
+    source: "textlint:prefer-tari-tari"
+    examples:
+      - before: "読んだり書く"
+        after: "読んだり書いたりする"
+
+  # 29. ゼロ幅スペースの検出
+  - id: "consistency.zero_width_space"
+    severity: "error"
+    category: "consistency"
+    pattern: "[\u200B\u200C\u200D\uFEFF]"
+    message: "ゼロ幅スペースが含まれています。削除してください"
+    autoFix: true
+    replacement: ""
+    enabled: true
+    source: "textlint:no-zero-width-spaces"
+    examples:
+      - before: "テキスト​（不可視）"
+        after: "テキスト"
+
+  # 30. 丸括弧・角括弧の対応チェック
+  - id: "grammar.unmatched_parentheses_round"
+    severity: "error"
+    category: "grammar"
+    pattern: "(?:（(?:[^）]*)$|^(?:[^（]*)）)"
+    message: "丸括弧が対応していません。閉じ括弧を確認してください"
+    autoFix: false
+    enabled: true
+    source: "textlint:ja-no-inappropriate-words"
+    examples:
+      - before: "例（サンプル"
+        after: "例（サンプル）"
+
+  # 31. ら抜き言葉（見れる）
+  - id: "grammar.ranuki_mireru"
+    severity: "warn"
+    category: "grammar"
+    pattern: "見れる"
+    message: "「見れる」はら抜き言葉です。「見られる」を検討してください"
+    autoFix: true
+    replacement: "見られる"
+    enabled: true
+    source: "textlint:no-dropping-the-ra"
+    examples:
+      - before: "見れる"
+        after: "見られる"
+
+  # 32. ら抜き言葉（来れる）
+  - id: "grammar.ranuki_koreru"
+    severity: "warn"
+    category: "grammar"
+    pattern: "来れる"
+    message: "「来れる」はら抜き言葉です。「来られる」を検討してください"
+    autoFix: true
+    replacement: "来られる"
+    enabled: true
+    source: "textlint:no-dropping-the-ra"
+    examples:
+      - before: "来れる"
+        after: "来られる"

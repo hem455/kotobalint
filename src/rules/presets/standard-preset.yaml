@@ -1,0 +1,145 @@
+meta:
+  id: "preset-standard-v1.0.0"
+  version: "1.0.0"
+  locale: "ja-JP"
+  name: "Standardプリセット（バランス型・推奨）"
+  description: "18ルール。品質とパフォーマンスのバランス。処理時間1-3秒。技術文書・ブログに最適。"
+  basedOn: "textlint-rule-preset-ja-technical-writing"
+  performance: "balanced"
+  targetUseCase: "技術文書、ブログ記事、ビジネス文書"
+  includesPresets: ["light-preset"]
+
+rules:
+  # === Light プリセット全8ルールを含む ===
+
+  # 9. 連続漢字の長さ制限（7文字以上）
+  - id: "style.max_kanji_continuous"
+    severity: "info"
+    category: "style"
+    pattern: "[一-龯]{7,}"
+    message: "漢字が7文字以上連続しています（6文字まで推奨）。読みやすさのため分割を検討してください"
+    autoFix: false
+    enabled: true
+    source: "textlint:max-kanji-continuous-len"
+    examples:
+      - before: "情報処理技術者試験"
+        after: "情報処理の技術者試験"
+
+  # 10. 形式名詞のひらがな表記（こと・とき・もの）
+  - id: "style.hiragana_formal_noun_koto"
+    severity: "info"
+    category: "style"
+    pattern: "([をにがはでと])事([がをにはで])"
+    message: "形式名詞「事」は「こと」とひらがなで書くことを推奨します"
+    autoFix: true
+    replacement: "$1こと$2"
+    enabled: true
+    source: "textlint:ja-hiragana-keishikimeishi"
+    examples:
+      - before: "知っている事が"
+        after: "知っていることが"
+
+  - id: "style.hiragana_formal_noun_toki"
+    severity: "info"
+    category: "style"
+    pattern: "([をにがはでと])時([がをにはで])"
+    message: "形式名詞「時」は「とき」とひらがなで書くことを推奨します"
+    autoFix: true
+    replacement: "$1とき$2"
+    enabled: true
+    source: "textlint:ja-hiragana-keishikimeishi"
+    examples:
+      - before: "考えた時に"
+        after: "考えたときに"
+
+  # 12. 弱い表現の検出
+  - id: "style.weak_phrase"
+    severity: "info"
+    category: "style"
+    pattern: "(かもしれません|かもしれない|思います|思われます)"
+    message: "弱い表現です。断定的な表現を検討してください（文脈に応じて）"
+    autoFix: false
+    enabled: true
+    source: "textlint:ja-no-weak-phrase"
+    examples:
+      - before: "効果があるかもしれません"
+        after: "効果があります"
+
+  # 13. 同じ接続詞の繰り返し
+  - id: "style.doubled_conjunction"
+    severity: "info"
+    category: "style"
+    pattern: "(しかし|また|そして|それで|ただし|なお)([^。]{0,50}?)(しかし|また|そして|それで|ただし|なお)"
+    message: "接続詞が近くで重複しています。バリエーションを検討してください"
+    autoFix: false
+    enabled: true
+    source: "textlint:no-doubled-conjunction"
+    examples:
+      - before: "しかし、〜。しかし、〜。"
+        after: "しかし、〜。ただし、〜。"
+
+  # 14. 文体の混在検出（ですます調・である調）
+  - id: "style.mixed_writing_style_desumasu"
+    severity: "warn"
+    category: "style"
+    pattern: "(です|ます|でした|ました)。[^。]{0,100}?(である|だ|であった|であろう)。"
+    message: "です・ます調とである調が混在しています。文体を統一してください"
+    autoFix: false
+    enabled: true
+    source: "textlint:no-mix-dearu-desumasu"
+    examples:
+      - before: "これは重要です。理由は明確である。"
+        after: "これは重要です。理由は明確です。"
+
+  # 15. 連続する空白
+  - id: "style.multiple_spaces"
+    severity: "info"
+    category: "style"
+    pattern: "\\s{2,}"
+    message: "連続する空白があります。1つにまとめてください"
+    autoFix: true
+    replacement: " "
+    enabled: true
+    source: "textlint:ja-space-around-code"
+    examples:
+      - before: "これは  サンプルです"
+        after: "これは サンプルです"
+
+  # 16. 同じ単語の連続
+  - id: "style.word_repetition"
+    severity: "info"
+    category: "style"
+    pattern: "([ぁ-ん]{2,})\\s*\\1"
+    message: "同じ語が連続して使用されています"
+    autoFix: false
+    enabled: true
+    source: "textlint:ja-no-successive-word"
+    examples:
+      - before: "それはそれ"
+        after: "それは別の問題"
+
+  # 17. 断定的表現（リスク）
+  - id: "risk.assertive_expression"
+    severity: "info"
+    category: "risk"
+    pattern: "(必ず|絶対|間違いなく|確実に|常に|いつも|全て|全部)"
+    message: "断定的な表現です。必要に応じて緩和表現を使用してください"
+    autoFix: false
+    enabled: true
+    source: "native"
+    examples:
+      - before: "必ず成功します"
+        after: "成功する可能性が高いです"
+
+  # 18. 比較優位表現（リスク）
+  - id: "risk.comparative_superiority"
+    severity: "info"
+    category: "risk"
+    pattern: "(最高|最上|最高級|一番|最も|最大|最小)"
+    message: "比較優位表現です。事実確認を推奨します"
+    autoFix: false
+    enabled: true
+    source: "native"
+    examples:
+      - before: "最高の品質"
+        after: "優れた品質"

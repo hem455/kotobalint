@@ -1,0 +1,116 @@
+meta:
+  id: "preset-light-v1.0.0"
+  version: "1.0.0"
+  locale: "ja-JP"
+  name: "Lightプリセット（リアルタイム校正向け）"
+  description: "最も基本的な8ルール。リアルタイム校正に最適。処理時間<1秒を目標。"
+  basedOn: "textlint-rule-preset-ja-spacing + 基本ルール"
+  performance: "fast"
+  targetUseCase: "リアルタイム入力支援、チャット文、SNS投稿"
+
+rules:
+  # 1. 助詞の重複（最重要・軽量）
+  - id: "grammar.particle_repetition"
+    severity: "warn"
+    category: "grammar"
+    pattern: "(が|を|に|で|と|から|まで|へ|より)\\s*([^。]{0,15}?)\\s*(が|を|に|で|と|から|まで|へ|より)"
+    message: "助詞が近くで重複しています。文構造を見直してください"
+    autoFix: false
+    enabled: true
+    source: "textlint:no-doubled-joshi"
+    examples:
+      - before: "彼が私が行った"
+        after: "彼は私が行った"
+
+  # 2. 二重否定（基本文法）
+  - id: "grammar.double_negation"
+    severity: "warn"
+    category: "grammar"
+    pattern: "(ない|ぬ|ん)([^。]{0,10}?)(ない|ぬ|ん)"
+    message: "二重否定の表現です。意味が不明瞭になる可能性があります"
+    autoFix: false
+    enabled: true
+    source: "textlint:no-double-negative-ja"
+    examples:
+      - before: "分からないことはない"
+        after: "分かる"
+
+  # 3. ら抜き言葉（食べれる）
+  - id: "grammar.ranuki_tabereru"
+    severity: "warn"
+    category: "grammar"
+    pattern: "食べれる"
+    message: "「食べれる」はら抜き言葉です。「食べられる」を検討してください"
+    autoFix: true
+    replacement: "食べられる"
+    enabled: true
+    source: "textlint:no-dropping-the-ra"
+    examples:
+      - before: "食べれる"
+        after: "食べられる"
+
+  # 4. 冗長表現: することができる（高頻出）
+  - id: "style.redundant_expression.potential"
+    severity: "info"
+    category: "style"
+    pattern: "することができる"
+    message: "冗長な表現です。「できる」に簡略化できます"
+    autoFix: true
+    replacement: "できる"
+    enabled: true
+    source: "textlint:ja-no-redundant-expression"
+    examples:
+      - before: "実行することができる"
+        after: "実行できる"
+
+  # 5. 全角英数字（スペース系・軽量）
+  - id: "consistency.full_half_width"
+    severity: "info"
+    category: "consistency"
+    pattern: "[Ａ-Ｚａ-ｚ０-９]"
+    message: "全角英数字が使用されています。半角に統一してください"
+    autoFix: false
+    enabled: true
+    source: "textlint:ja-space-between-half-and-full-width"
+    examples:
+      - before: "Hello１２３"
+        after: "Hello123"
+
+  # 6. 読点の過剰使用（軽量版：4個以上を警告）
+  - id: "style.max_reading_points_light"
+    severity: "info"
+    category: "style"
+    pattern: "([^。]*?、[^。]*?、[^。]*?、[^。]*?、)"
+    message: "読点が多すぎます（3個まで推奨）。文を分割してください"
+    autoFix: false
+    enabled: true
+    source: "textlint:max-ten"
+    examples:
+      - before: "A、B、C、D、Eです。"
+        after: "A、B、Cです。D、Eです。"
+
+  # 7. 二重敬語（基本）
+  - id: "honorific.double_honorific"
+    severity: "error"
+    category: "honorific"
+    pattern: "(お伺いさせていただく|ご連絡申し上げます)"
+    message: "二重敬語です。簡潔な表現に変更してください"
+    autoFix: false
+    enabled: true
+    source: "native"
+    examples:
+      - before: "お伺いさせていただく"
+        after: "お伺いする"
+
+  # 8. 長文検出（120文字で警告・緩め）
+  - id: "style.long_sentence_light"
+    severity: "info"
+    category: "style"
+    pattern: "[^。]{121,}"
+    message: "文が長すぎます（120文字超）。分割を検討してください"
+    autoFix: false
+    enabled: true
+    source: "textlint:sentence-length"
+    examples:
+      - before: "（121文字以上の文）"
+        after: "（2文に分割）"
