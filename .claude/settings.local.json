@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uvx:*)",
+      "Bash(claude mcp inspect:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm install)",
+      "Bash(curl -X POST http://localhost:3000/api/suggest -H \"Content-Type: application/json\" -d '{\"text\":\"この文章はとても冗長で、読みにくいかもしれないですね。\"}')",
+      "Bash(curl -X POST http://localhost:3000/api/suggest -H \"Content-Type: application/json\" -d '{\"passages\":[{\"text\":\"この文章はとても冗長で、読みにくいかもしれないですね。同じことを何度も繰り返し述べています。\"}]}')"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
