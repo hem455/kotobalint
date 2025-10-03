@@ -52,7 +52,7 @@ export class SchemaValidator {
       : defaultLogger;
 
     this.config = {
-      maxIssues: 10,
+      maxIssues: 30, // 長文対応のため10→30に増加
       maxSuggestionsPerIssue: 3,
       allowedSeverities: ['info', 'warn', 'error'],
       allowedCategories: ['style', 'grammar', 'honorific', 'consistency', 'risk'],

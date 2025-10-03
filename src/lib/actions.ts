@@ -110,10 +110,12 @@ export const useAnalysisActions = () => {
 
     try {
       const response = await generateSuggestionsForText(text, style);
-      
-      // 既存の問題に追加
-      const { addIssues } = useAppStore.getState();
-      addIssues(response.issues);
+
+      // 古いLLM issuesを削除してから新しいものを追加
+      const { issues, setIssues } = useAppStore.getState();
+      const nonLLMIssues = issues.filter(issue => issue.source !== 'llm');
+      const allIssues = [...nonLLMIssues, ...response.issues];
+      setIssues(allIssues);
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'LLM提案生成中にエラーが発生しました';
