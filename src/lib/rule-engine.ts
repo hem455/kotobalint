@@ -27,6 +27,25 @@ export class RuleEngine {
   };
 
   /**
+   * 助詞重複検出の例外パターン
+   * これらの表現は自然な日本語として許容される
+   */
+  private readonly PARTICLE_EXCEPTIONS = [
+    'ということ',
+    'といった',
+    'とか',
+    'とは',
+    'では',
+    'でも',
+    'でした',
+    'ので',
+    'のに',
+    'ならない',
+    'から',
+    'まで'
+  ];
+
+  /**
    * ルールを追加
    */
   addRule(rule: Rule): void {
@@ -300,6 +319,20 @@ export class RuleEngine {
   }
 
   /**
+   * 助詞重複の例外チェック
+   * マッチ範囲の前後コンテキストを確認し、自然な表現かどうかを判定
+   */
+  private isParticleException(text: string, range: TextRange): boolean {
+    // 前後5文字のコンテキストを取得
+    const contextStart = Math.max(0, range.start - 5);
+    const contextEnd = Math.min(text.length, range.end + 5);
+    const context = text.slice(contextStart, contextEnd);
+
+    // 例外パターンのいずれかにマッチするかチェック
+    return this.PARTICLE_EXCEPTIONS.some(exception => context.includes(exception));
+  }
+
+  /**
    * 正規表現マッチからIssueを作成
    */
   private createIssueFromRegexMatch(rule: Rule, match: RegExpExecArray, text: string): Issue | null {
@@ -307,6 +340,13 @@ export class RuleEngine {
       start: match.index,
       end: match.index + match[0].length
     };
+
+    // 助詞重複ルールの場合は例外チェックを実施
+    if (rule.id === 'grammar.particle_repetition') {
+      if (this.isParticleException(text, range)) {
+        return null; // 例外パターンに該当する場合はIssueを生成しない
+      }
+    }
 
     const suggestions: Suggestion[] = [];
     if (rule.autoFix && rule.replacement) {

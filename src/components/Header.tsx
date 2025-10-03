@@ -16,6 +16,7 @@ export default function Header() {
     generateLLMSuggestions,
     applyAllAutoFixesToIssues,
     openSettings,
+    updateSettings,
     settings,
     isAnalyzing
   } = useApp();
@@ -40,6 +41,24 @@ export default function Header() {
   const handleSettings = useCallback(() => {
     openSettings();
   }, [openSettings]);
+
+  const handleModeChange = useCallback((mode: 'llm' | 'rules') => {
+    updateSettings({
+      analysis: {
+        ...settings.analysis,
+        mode
+      }
+    });
+  }, [updateSettings, settings]);
+
+  const handlePresetChange = useCallback((preset: 'light' | 'standard' | 'strict') => {
+    updateSettings({
+      analysis: {
+        ...settings.analysis,
+        preset
+      }
+    });
+  }, [updateSettings, settings]);
 
   // キーボードナビゲーションの設定
   useEffect(() => {
@@ -107,6 +126,50 @@ export default function Header() {
             />
             <span id="auto-analysis-description">自動解析</span>
           </label>
+
+          {/* モード選択 */}
+          <div className="flex items-center gap-2 text-sm border-l pl-2">
+            <span className="text-slate-600">モード:</span>
+            <label className="inline-flex items-center gap-1 cursor-pointer">
+              <input
+                type="radio"
+                name="analysis-mode"
+                value="llm"
+                checked={settings?.analysis?.mode === 'llm'}
+                onChange={() => handleModeChange('llm')}
+                className={`text-blue-600 ${getFocusIndicatorClasses()}`}
+              />
+              <span className="text-slate-700">LLM</span>
+            </label>
+            <label className="inline-flex items-center gap-1 cursor-pointer">
+              <input
+                type="radio"
+                name="analysis-mode"
+                value="rules"
+                checked={settings?.analysis?.mode === 'rules'}
+                onChange={() => handleModeChange('rules')}
+                className={`text-blue-600 ${getFocusIndicatorClasses()}`}
+              />
+              <span className="text-slate-700">ルールベース</span>
+            </label>
+          </div>
+
+          {/* プリセット選択（ルールベースモード時のみ） */}
+          {settings?.analysis?.mode === 'rules' && (
+            <div className="flex items-center gap-2 text-sm">
+              <label htmlFor="preset-select" className="text-slate-600">プリセット:</label>
+              <select
+                id="preset-select"
+                value={settings?.analysis?.preset || 'standard'}
+                onChange={(e) => handlePresetChange(e.target.value as 'light' | 'standard' | 'strict')}
+                className={`rounded border-gray-300 text-sm ${getFocusIndicatorClasses()}`}
+              >
+                <option value="light">Light (高速)</option>
+                <option value="standard">Standard (推奨)</option>
+                <option value="strict">Strict (厳格)</option>
+              </select>
+            </div>
+          )}
 
           {/* 解析ボタン */}
           <button

@@ -63,76 +63,63 @@ export default function TextEditor() {
     return filtered;
   }, [issues, filters]);
 
-  // ハイライト用のHTMLを生成
+  // ハイライト用のHTMLを生成（選択されたissueのみ表示）
   const highlightedHTML = useMemo(() => {
     console.log('🔍 Debug - filteredIssues:', filteredIssues);
+    console.log('🔍 Debug - selectedIssue:', selectedIssue);
     console.log('🔍 Debug - text length:', text.length);
-    
-    const strength: Record<string, number> = { info: 1, warn: 2, error: 3 };
-    const cover: (string | null)[] = new Array(text.length).fill(null);
 
-    // 問題の範囲をカバレッジ配列にマーク
-    filteredIssues.forEach((issue, index) => {
-      console.log(`🔍 Debug - Issue ${index}:`, {
-        id: issue.id,
-        severity: issue.severity,
-        range: issue.range,
-        message: issue.message
-      });
-      
-      const safeStart = Math.max(issue.range.start, 0);
-      const safeEnd = Math.min(Math.max(issue.range.end, 0), text.length);
-      
-      console.log(`🔍 Debug - Safe range: ${safeStart} - ${safeEnd}`);
-      
-      if (safeStart < safeEnd) {
-        for (let p = safeStart; p < safeEnd; p++) {
-          const cur = cover[p];
-          if (!cur || strength[issue.severity] > strength[cur]) {
-            cover[p] = issue.severity;
-          }
-        }
-      }
-    });
-
-    const sevClass: Record<string, string> = {
-      info: "underline decoration-2 decoration-blue-400 underline-offset-2",
-      warn: "underline decoration-2 decoration-yellow-500 underline-offset-2",
-      error: "underline decoration-2 decoration-red-500 underline-offset-2",
-    };
-
-    // 選択された問題のハイライトクラス
-    const selectedClass = "bg-yellow-200 ring-2 ring-yellow-400 ring-opacity-50";
-
-    let html = "";
-    let i = 0;
-    while (i < text.length) {
-      const sev = cover[i];
-      let j = i + 1;
-      while (j < text.length && cover[j] === sev) j++;
-      
-      const chunk = text.slice(i, j)
+    // 選択されたissueがない場合は何もハイライトしない
+    if (!selectedIssue) {
+      return text
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         .replace(/\n/g, "<br/>");
-      
-      // 選択された問題の範囲かチェック（重複検出）
-      const isSelected = selectedIssue && 
-        i >= selectedIssue.range.start && 
-        j <= selectedIssue.range.end;
-
-      if (sev) {
-        const classes = isSelected ? `${sevClass[sev]} ${selectedClass}` : sevClass[sev];
-        html += `<span class="${classes} pointer-events-auto" data-issue-range="${i}-${j}">${chunk}</span>`;
-      } else {
-        const classes = isSelected ? selectedClass : "";
-        html += classes ? `<span class="${classes} pointer-events-auto">${chunk}</span>` : chunk;
-      }
-      i = j;
     }
+
+    // 重要度に応じたハイライトクラス
+    const sevClass: Record<string, string> = {
+      info: "bg-blue-100 border-b-2 border-blue-400",
+      warn: "bg-yellow-100 border-b-2 border-yellow-500",
+      error: "bg-red-100 border-b-2 border-red-500",
+    };
+
+    const highlightClass = `${sevClass[selectedIssue.severity]} rounded px-0.5`;
+
+    let html = "";
+    let i = 0;
+    const start = selectedIssue.range.start;
+    const end = selectedIssue.range.end;
+
+    // 選択issue前のテキスト
+    if (start > 0) {
+      html += text.slice(0, start)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\n/g, "<br/>");
+    }
+
+    // 選択issueのハイライト部分
+    const highlightedText = text.slice(start, end)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\n/g, "<br/>");
+    html += `<span class="${highlightClass}" data-issue-id="${selectedIssue.id}">${highlightedText}</span>`;
+
+    // 選択issue後のテキスト
+    if (end < text.length) {
+      html += text.slice(end)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\n/g, "<br/>");
+    }
+
     return html;
-  }, [text, filteredIssues, selectedIssue]);
+  }, [text, selectedIssue]);
 
 
   // スクロール同期（改良版）
@@ -156,18 +143,42 @@ export default function TextEditor() {
     syncScroll();
   }, [text]);
 
-  // スクロールイベントのリスナーを追加（リアルタイム同期）
+  // 初回レンダリング後にスクロール位置を同期
   useEffect(() => {
-    const editor = editorRef.current;
-    if (!editor) return;
-
-    const handleScroll = () => {
-      syncScroll();
-    };
-
-    editor.addEventListener('scroll', handleScroll);
-    return () => editor.removeEventListener('scroll', handleScroll);
+    syncScroll();
   }, []);
+
+  // 選択されたissueが変更されたら、その位置へスクロール
+  useEffect(() => {
+    if (!selectedIssue || !editorRef.current || !overlayRef.current) return;
+
+    // ハイライト要素を取得
+    const highlightElement = overlayRef.current.querySelector(`[data-issue-id="${selectedIssue.id}"]`);
+    if (!highlightElement) return;
+
+    // 要素の位置を取得してスクロール
+    const elementRect = highlightElement.getBoundingClientRect();
+    const containerRect = overlayRef.current.getBoundingClientRect();
+
+    // コンテナの中央に表示されるようにスクロール位置を計算
+    const scrollTop = overlayRef.current.scrollTop +
+      (elementRect.top - containerRect.top) -
+      (containerRect.height / 2) +
+      (elementRect.height / 2);
+
+    // スムーズスクロール
+    editorRef.current.scrollTo({
+      top: Math.max(0, scrollTop),
+      behavior: 'smooth'
+    });
+
+    // オーバーレイも同期
+    requestAnimationFrame(() => {
+      if (overlayRef.current && editorRef.current) {
+        overlayRef.current.scrollTop = editorRef.current.scrollTop;
+      }
+    });
+  }, [selectedIssue]);
 
   // テキスト変更ハンドラー
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -184,24 +195,6 @@ export default function TextEditor() {
       selectTextRange({ start: selectionStart, end: selectionEnd });
     } else {
       selectTextRange(null);
-    }
-  };
-
-  // ハイライトクリックハンドラー（改良版）
-  const handleHighlightClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    // オーバーレイのクリックイベントを停止
-    e.preventDefault();
-    e.stopPropagation();
-    
-    const target = e.target as HTMLElement;
-    const spanElement = target.closest('[data-issue-range]') as HTMLElement;
-    if (spanElement) {
-      const rangeAttr = spanElement.getAttribute('data-issue-range');
-      if (rangeAttr) {
-        const [start, end] = rangeAttr.split('-').map(Number);
-        selectTextRange({ start, end });
-        editorRef.current?.focus();
-      }
     }
   };
 
@@ -251,18 +244,16 @@ export default function TextEditor() {
       </div>
 
       {/* エディターコンテナ */}
-      <div className="relative h-[460px] overflow-auto rounded-xl border bg-white" role="textbox" aria-label="テキストエディター">
+      <div className="relative h-[460px] rounded-xl border bg-white" role="textbox" aria-label="テキストエディター">
         {/* ハイライトオーバーレイ */}
         <div
           ref={overlayRef}
           aria-hidden
-          className="absolute inset-0 whitespace-pre-wrap p-4 font-mono text-sm leading-6 text-transparent"
+          className="absolute inset-0 overflow-auto whitespace-pre-wrap p-4 font-mono text-sm leading-6 text-transparent pointer-events-none"
           style={{ 
-            tabSize: 4,
-            pointerEvents: 'auto' // ハイライトをクリック可能にする
+            tabSize: 4
           }}
           dangerouslySetInnerHTML={{ __html: highlightedHTML }}
-          onClick={handleHighlightClick}
         />
 
         {/* テキストエリア */}
@@ -272,7 +263,8 @@ export default function TextEditor() {
           onChange={handleTextChange}
           onSelect={handleTextSelect}
           onClick={handleTextAreaClick}
-          className={`absolute inset-0 resize-none bg-transparent p-4 font-mono text-sm leading-6 caret-slate-900 text-slate-900 selection:bg-slate-200 ${getFocusIndicatorClasses()}`}
+          onScroll={syncScroll}
+          className={`absolute inset-0 overflow-auto resize-none bg-transparent p-4 font-mono text-sm leading-6 caret-slate-900 text-slate-900 selection:bg-slate-200 ${getFocusIndicatorClasses()}`}
           style={{ 
             tabSize: 4
           }}

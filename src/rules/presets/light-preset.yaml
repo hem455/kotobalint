@@ -9,12 +9,12 @@ meta:
   targetUseCase: "リアルタイム入力支援、チャット文、SNS投稿"
 
 rules:
-  # 1. 助詞の重複（最重要・軽量）
+  # 1. 助詞の重複（最重要・軽量）- 同じ助詞のみ検出（「と」は列挙表現で自然なため除外）
   - id: "grammar.particle_repetition"
     severity: "warn"
     category: "grammar"
-    pattern: "(が|を|に|で|と|から|まで|へ|より)\\s*([^。]{0,15}?)\\s*(が|を|に|で|と|から|まで|へ|より)"
-    message: "助詞が近くで重複しています。文構造を見直してください"
+    pattern: "(が|を|に|で|から|まで|へ|より)([^。]{0,10}?)\\1"
+    message: "同じ助詞が近くで重複しています。文構造を見直してください"
     autoFix: false
     enabled: true
     source: "textlint:no-doubled-joshi"

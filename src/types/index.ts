@@ -87,6 +87,21 @@ export interface SuggestResponse {
   };
 }
 
+export interface AnalyzeRequest {
+  text: string;
+  preset: Preset;
+}
+
+export interface AnalyzeResponse {
+  issues: Issue[];
+  meta: {
+    elapsedMs: number;
+    preset: Preset;
+    rulesApplied: number;
+    textLength: number;
+  };
+}
+
 // Settings Data Model
 
 export interface AppSettings {
@@ -94,6 +109,8 @@ export interface AppSettings {
     trigger: 'manual' | 'auto';
     autoDelay: number; // milliseconds
     maxSentenceLength: number;
+    mode: AnalysisMode;
+    preset: Preset;
   };
   rules: {
     activeRuleset: string;
@@ -145,6 +162,8 @@ export type IssueSeverity = 'info' | 'warn' | 'error';
 export type IssueSource = 'rule' | 'llm';
 export type IssueCategory = 'style' | 'grammar' | 'honorific' | 'consistency' | 'risk';
 export type AnalysisTrigger = 'manual' | 'auto';
+export type AnalysisMode = 'llm' | 'rules';
+export type Preset = 'light' | 'standard' | 'strict';
 export type Theme = 'light' | 'dark';
 export type FontSize = 'small' | 'medium' | 'large';
 export type FontFamily = 'monospace' | 'sans-serif';

@@ -3,6 +3,8 @@ import type {
   LintResponse,
   SuggestRequest,
   SuggestResponse,
+  AnalyzeRequest,
+  AnalyzeResponse,
   AppSettings,
   TextPassage,
   ContentStyle
@@ -61,6 +63,31 @@ export class ApiClient {
     const data = await response.json();
     if (!data.success) {
       throw new Error(data.error?.message || 'Suggest API エラー');
+    }
+
+    return data.data;
+  }
+
+  /**
+   * ルールベース解析（プリセット使用）
+   */
+  async analyzeTextRules(request: AnalyzeRequest): Promise<AnalyzeResponse> {
+    const response = await fetch(`${this.baseUrl}/api/analyze`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error?.message || 'Analyze API エラー');
     }
 
     return data.data;

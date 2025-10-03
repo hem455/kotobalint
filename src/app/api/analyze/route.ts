@@ -52,17 +52,26 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
     // プリセットの決定（デフォルトは standard）
     const preset = body.preset || 'standard';
 
-    // プリセットローダーからルールを読み込む
+    // プリセットマッピング（累積的）
+    const presetMapping: Record<string, Array<'light' | 'standard' | 'strict'>> = {
+      'light': ['light'],
+      'standard': ['light', 'standard'],
+      'strict': ['light', 'standard', 'strict']
+    };
+
+    // プリセットローダーから累積的にルールを読み込む
     console.log(`プリセット "${preset}" を読み込み中...`);
-    const presetConfig = await defaultPresetLoader.loadPreset(preset);
+    console.log(`  - 累積構成: ${presetMapping[preset].join(' + ')}`);
+    const rules = await defaultPresetLoader.loadPresets(presetMapping[preset]);
+    console.log(`  - 合計ルール数: ${rules.length}`);
 
     // ルールエンジンの初期化
     const engine = new RuleEngine();
-    engine.addRules(presetConfig.rules);
+    engine.addRules(rules);
 
     console.log(`ルールエンジン初期化完了: ${engine.getRuleCount()}ルール`);
     console.log('最初の3ルール:');
-    presetConfig.rules.slice(0, 3).forEach(r => {
+    rules.slice(0, 3).forEach(r => {
       console.log(`  - ${r.id}: pattern=${r.pattern instanceof RegExp ? 'RegExp' : typeof r.pattern}, enabled=${r.enabled}`);
     });
     console.log('解析対象テキスト:', body.text);
@@ -76,6 +85,17 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
     });
 
     console.log(`解析完了: ${result.issues.length}個の問題を検出`);
+    
+    // デバッグ: 各 issue の詳細をログ出力
+    result.issues.forEach((issue, idx) => {
+      console.log(`Issue #${idx + 1}:`, {
+        id: issue.id,
+        range: issue.range,
+        message: issue.message,
+        matchedText: body.text.slice(issue.range.start, issue.range.end),
+        suggestions: issue.suggestions?.map(s => s.text)
+      });
+    });
 
     // レスポンスの構築
     return NextResponse.json({

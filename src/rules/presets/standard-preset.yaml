@@ -91,21 +91,7 @@ rules:
       - before: "これは重要です。理由は明確である。"
         after: "これは重要です。理由は明確です。"
 
-  # 15. 連続する空白
-  - id: "style.multiple_spaces"
-    severity: "info"
-    category: "style"
-    pattern: "\\s{2,}"
-    message: "連続する空白があります。1つにまとめてください"
-    autoFix: true
-    replacement: " "
-    enabled: true
-    source: "textlint:ja-space-around-code"
-    examples:
-      - before: "これは  サンプルです"
-        after: "これは サンプルです"
-
-  # 16. 同じ単語の連続
+  # 15. 同じ単語の連続
   - id: "style.word_repetition"
     severity: "info"
     category: "style"

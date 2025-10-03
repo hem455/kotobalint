@@ -46,7 +46,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   analysis: {
     trigger: 'manual',
     autoDelay: 500,
-    maxSentenceLength: 10000
+    maxSentenceLength: 10000,
+    mode: 'llm',
+    preset: 'standard'
   },
   rules: {
     activeRuleset: 'japanese-standard',

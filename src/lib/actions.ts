@@ -32,29 +32,58 @@ export const useAnalysisActions = () => {
     const preview = targetText.slice(0, previewLength).replace(/\n/g, ' ');
     const redactedInfo = `[len=${targetText.length}] preview="${preview}${targetText.length > previewLength ? '…' : ''}"`;
     if (useAppStore.getState().settings.privacy.logAnalytics) {
-      console.log('解析を開始します:', redactedInfo);
+      console.log('解析を開始します:', redactedInfo, 'mode:', settings.analysis.mode);
     }
     setAnalyzing(true);
     clearError();
 
     try {
-      const request: LintRequest = {
-        text: targetText,
-        ruleset: settings.rules.activeRuleset,
-        options: {
-          maxIssues: 100,
-          includeSuggestions: true,
-          timeout: 10000
-        }
-      };
+      // モードに応じて分岐
+      if (settings.analysis.mode === 'rules') {
+        // ルールベース解析（プリセット使用）
+        const response = await apiClient.analyzeTextRules({
+          text: targetText,
+          preset: settings.analysis.preset
+        });
+        
+        // デバッグ: 返された issues を確認
+        console.log('[analyzeText] Rules mode - API response:', {
+          issuesCount: response.issues.length,
+          preset: settings.analysis.preset,
+          textLength: targetText.length
+        });
+        
+        response.issues.forEach((issue, idx) => {
+          console.log(`[analyzeText] Issue #${idx + 1}:`, {
+            id: issue.id,
+            range: issue.range,
+            message: issue.message,
+            matchedText: targetText.slice(issue.range.start, issue.range.end),
+            source: issue.source
+          });
+        });
+        
+        setIssues(response.issues);
+      } else {
+        // LLMモード（従来の /api/lint）
+        const request: LintRequest = {
+          text: targetText,
+          ruleset: settings.rules.activeRuleset,
+          options: {
+            maxIssues: 100,
+            includeSuggestions: true,
+            timeout: 10000
+          }
+        };
 
-      const response = await apiClient.lintText(request);
-      // 既存のLLM由来の問題は保持し、ルールベース結果で上書きしない
-      const existingIssues = useAppStore.getState().issues || [];
-      const llmIssues = existingIssues.filter((i) => i.source === 'llm');
-      // ルールベース結果（source!== 'llm' とみなす）を優先
-      const merged = [...response.issues, ...llmIssues];
-      setIssues(merged);
+        const response = await apiClient.lintText(request);
+        // 既存のLLM由来の問題は保持し、ルールベース結果で上書きしない
+        const existingIssues = useAppStore.getState().issues || [];
+        const llmIssues = existingIssues.filter((i) => i.source === 'llm');
+        // ルールベース結果（source!== 'llm' とみなす）を優先
+        const merged = [...response.issues, ...llmIssues];
+        setIssues(merged);
+      }
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '解析中にエラーが発生しました';

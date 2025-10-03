@@ -191,20 +191,25 @@ const IssueDetail = memo(function IssueDetail() {
         </div>
       )}
 
-      {/* メタデータ */}
-      {selectedIssue.metadata && Object.keys(selectedIssue.metadata).length > 0 && (
-        <div>
-          <div className="text-xs font-medium text-slate-500 mb-1">詳細情報</div>
-          <div className="text-xs text-slate-600 space-y-1">
-            {Object.entries(selectedIssue.metadata).map(([key, value]) => (
-              <div key={key} className="flex justify-between">
-                <span className="font-medium">{key}:</span>
-                <span>{String(value)}</span>
-              </div>
-            ))}
+      {/* メタデータ（内部用フィールドを除外） */}
+      {selectedIssue.metadata && (() => {
+        const userFacingMetadata = Object.entries(selectedIssue.metadata)
+          .filter(([key]) => key !== 'originalText'); // 内部処理用フィールドを除外
+
+        return userFacingMetadata.length > 0 && (
+          <div>
+            <div className="text-xs font-medium text-slate-500 mb-1">詳細情報</div>
+            <div className="text-xs text-slate-600 space-y-1">
+              {userFacingMetadata.map(([key, value]) => (
+                <div key={key} className="flex justify-between">
+                  <span className="font-medium">{key}:</span>
+                  <span>{String(value)}</span>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* アクションボタン */}
       <div className="pt-4 border-t border-slate-200">
