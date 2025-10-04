@@ -50,7 +50,14 @@ export interface AppConfig {
   observability: ObservabilityConfig;
 }
 
-const DEFAULT_ALLOWED_CHARS = String.raw`[ぁ-んァ-ヶ一-龯a-zA-Z0-9\s。、！？「」『』（）［］｛｝：；"'.,?!\-_=+*&%$#@~`|\\/<>]`;
+const DEFAULT_ALLOWED_CHARS = String.raw`[ぁ-んァ-ヶ一-龯a-zA-Z0-9\s。、！？「」『』（）［］｛｝：；"'.,?!\-_=+*&%$#@~\`|\\/<>]`;
+
+/**
+ * ログレベルの型ガード
+ */
+function isValidLogLevel(level: string): level is 'debug' | 'info' | 'warn' | 'error' {
+  return level === 'debug' || level === 'info' || level === 'warn' || level === 'error';
+}
 
 /**
  * 設定を環境変数から読み込み
@@ -61,7 +68,9 @@ function loadConfig(): AppConfig {
       enabled: process.env.PII_DETECTION_ENABLED === 'true',
       sensitivePatterns: process.env.PII_SENSITIVE_PATTERNS?.split(',') || [],
       maskCharacter: process.env.PII_MASK_CHARACTER || '[MASKED]',
-      logLevel: (process.env.PII_LOG_LEVEL as any) || 'info'
+      logLevel: (process.env.PII_LOG_LEVEL && isValidLogLevel(process.env.PII_LOG_LEVEL)) 
+        ? process.env.PII_LOG_LEVEL 
+        : 'info'
     },
     promptSanitizer: {
       enabled: process.env.PROMPT_SANITIZER_ENABLED !== 'false',
@@ -87,7 +96,9 @@ function loadConfig(): AppConfig {
     observability: {
       enabled: process.env.OBSERVABILITY_ENABLED !== 'false',
       maxLogs: parseInt(process.env.OBSERVABILITY_MAX_LOGS || '1000'),
-      logLevel: (process.env.OBSERVABILITY_LOG_LEVEL as any) || 'info',
+      logLevel: (process.env.OBSERVABILITY_LOG_LEVEL && isValidLogLevel(process.env.OBSERVABILITY_LOG_LEVEL)) 
+        ? process.env.OBSERVABILITY_LOG_LEVEL 
+        : 'info',
       metricsEnabled: process.env.OBSERVABILITY_METRICS_ENABLED !== 'false',
       auditLogEnabled: process.env.OBSERVABILITY_AUDIT_LOG_ENABLED !== 'false'
     }
@@ -95,22 +106,29 @@ function loadConfig(): AppConfig {
 }
 
 /**
- * 設定インスタンス
+ * 設定インスタンス（内部変数）
  */
-export const config = loadConfig();
+let config = loadConfig();
+
+/**
+ * 設定を取得（イミュータブル）
+ */
+export function getConfig(): Readonly<AppConfig> {
+  return config;
+}
 
 /**
  * 設定を更新
  */
 export function updateConfig(newConfig: Partial<AppConfig>): void {
-  Object.assign(config, newConfig);
+  config = { ...config, ...newConfig };
 }
 
 /**
  * 設定をリセット
  */
 export function resetConfig(): void {
-  Object.assign(config, loadConfig());
+  config = loadConfig();
 }
 
 /**
@@ -120,8 +138,14 @@ export function validateConfig(): { isValid: boolean; errors: string[] } {
   const errors: string[] = [];
 
   // PII設定の検証
-  if (config.pii.maxLength < 0) {
-    errors.push('PII maxLength must be non-negative');
+  const validLogLevels = ['debug', 'info', 'warn', 'error'];
+  if (!validLogLevels.includes(config.pii.logLevel)) {
+    errors.push(`PII logLevel must be one of: ${validLogLevels.join(', ')}`);
+  }
+
+  // Prompt Sanitizer設定の検証
+  if (config.promptSanitizer.maxLength < 1) {
+    errors.push('Prompt sanitizer maxLength must be at least 1');
   }
 
   // スキーマバリデーター設定の検証
@@ -140,6 +164,23 @@ export function validateConfig(): { isValid: boolean; errors: string[] } {
 
   if (config.streaming.timeout < 1000) {
     errors.push('Streaming timeout must be at least 1000ms');
+  }
+
+  if (config.streaming.maxRetries < 0) {
+    errors.push('Streaming maxRetries must be at least 0');
+  }
+
+  if (config.streaming.retryDelay < 0) {
+    errors.push('Streaming retryDelay must be at least 0');
+  }
+
+  // Observability設定の検証
+  if (config.observability.maxLogs < 1) {
+    errors.push('Observability maxLogs must be at least 1');
+  }
+
+  if (!validLogLevels.includes(config.observability.logLevel)) {
+    errors.push(`Observability logLevel must be one of: ${validLogLevels.join(', ')}`);
   }
 
   return {

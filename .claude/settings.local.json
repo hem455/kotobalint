@@ -6,7 +6,16 @@
       "Bash(npm run dev:*)",
       "Bash(npm install)",
       "Bash(curl -X POST http://localhost:3000/api/suggest -H \"Content-Type: application/json\" -d '{\"text\":\"この文章はとても冗長で、読みにくいかもしれないですね。\"}')",
-      "Bash(curl -X POST http://localhost:3000/api/suggest -H \"Content-Type: application/json\" -d '{\"passages\":[{\"text\":\"この文章はとても冗長で、読みにくいかもしれないですね。同じことを何度も繰り返し述べています。\"}]}')"
+      "Bash(curl -X POST http://localhost:3000/api/suggest -H \"Content-Type: application/json\" -d '{\"passages\":[{\"text\":\"この文章はとても冗長で、読みにくいかもしれないですね。同じことを何度も繰り返し述べています。\"}]}')",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(npx tsx:*)",
+      "Bash(git reset:*)",
+      "Bash(git push:*)",
+      "Bash(npx shadcn@latest add:*)",
+      "Bash(npx:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run type-check:*)"
     ],
     "deny": [],
     "ask": []

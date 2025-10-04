@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
+import { Toaster } from 'sonner'
 
 export const metadata: Metadata = {
   title: {
@@ -75,6 +76,7 @@ export default function RootLayout({
         <div id="root">
           {children}
         </div>
+        <Toaster position="top-right" richColors />
 
         {/* Skip to main content for accessibility */}
         <a

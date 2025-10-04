@@ -87,10 +87,54 @@ export default function TextEditor() {
 
     const highlightClass = `${sevClass[selectedIssue.severity]} rounded px-0.5`;
 
+    // range検証
+    if (!selectedIssue.range || typeof selectedIssue.range !== 'object') {
+      console.warn('Invalid range: range is missing or not an object', selectedIssue);
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\n/g, "<br/>");
+    }
+
+    // startとendの検証と正規化
+    let start = Number(selectedIssue.range.start);
+    let end = Number(selectedIssue.range.end);
+
+    if (!Number.isFinite(start) || !Number.isFinite(end)) {
+      console.warn('Invalid range: start or end is not a finite number', { start, end, issue: selectedIssue });
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\n/g, "<br/>");
+    }
+
+    // 整数に変換
+    start = Math.floor(start);
+    end = Math.floor(end);
+
+    // 範囲のクランプ
+    start = Math.max(0, start);
+    end = Math.min(text.length, end);
+
+    // start > end の場合は入れ替え
+    if (start > end) {
+      console.warn('Invalid range: start > end, swapping', { start, end, issue: selectedIssue });
+      [start, end] = [end, start];
+    }
+
+    // ゼロ長の範囲はスキップ
+    if (start === end) {
+      console.warn('Zero-length range detected, skipping highlight', { start, end, issue: selectedIssue });
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\n/g, "<br/>");
+    }
+
     let html = "";
-    let i = 0;
-    const start = selectedIssue.range.start;
-    const end = selectedIssue.range.end;
 
     // 選択issue前のテキスト
     if (start > 0) {
@@ -237,7 +281,15 @@ export default function TextEditor() {
   return (
     <div className="relative">
       {/* ツールバー */}
-      <div className="mb-2 flex items-center justify-end">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {isAnalyzing && (
+            <div className="flex items-center gap-2 text-xs text-blue-600">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+              <span>解析中...</span>
+            </div>
+          )}
+        </div>
         <div className="text-xs text-slate-500" role="status" aria-live="polite">
           {text.length} 文字
         </div>

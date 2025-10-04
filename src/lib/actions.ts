@@ -1,6 +1,7 @@
 import { useAppStore } from './store';
 import { apiClient, generateSuggestionsForText } from './api-client';
 import type { LintRequest, ContentStyle, IssueSource, IssueSeverity, IssueCategory } from '@/types';
+import { toast } from 'sonner';
 
 /**
  * テキスト解析アクション
@@ -89,6 +90,12 @@ export const useAnalysisActions = () => {
       const errorMessage = error instanceof Error ? error.message : '解析中にエラーが発生しました';
       setError(errorMessage);
       console.error('Text analysis error:', error);
+
+      // Toast通知でエラーを表示
+      toast.error('テキスト解析エラー', {
+        description: errorMessage,
+        duration: 5000,
+      });
     } finally {
       setAnalyzing(false);
     }
@@ -97,11 +104,17 @@ export const useAnalysisActions = () => {
   const generateLLMSuggestions = async (style: ContentStyle = 'business') => {
     if (!text.trim()) {
       setError('LLM提案を生成するテキストがありません');
+      toast.error('LLM提案生成エラー', {
+        description: 'LLM提案を生成するテキストがありません',
+      });
       return;
     }
 
     if (!settings.llm.enabled) {
       setError('LLM機能が無効になっています');
+      toast.error('LLM提案生成エラー', {
+        description: 'LLM機能が無効になっています',
+      });
       return;
     }
 
@@ -121,6 +134,11 @@ export const useAnalysisActions = () => {
       const errorMessage = error instanceof Error ? error.message : 'LLM提案生成中にエラーが発生しました';
       setError(errorMessage);
       console.error('LLM suggestions error:', error);
+
+      toast.error('LLM提案生成エラー', {
+        description: errorMessage,
+        duration: 5000,
+      });
     } finally {
       setAnalyzing(false);
     }

@@ -186,10 +186,11 @@ export class SchemaValidator {
       }
     }
 
-    // 提案の検証
+    // 提案の検証（寛容モード: 無効な提案は警告として記録、スキップする）
     if (issueData.suggestions && Array.isArray(issueData.suggestions)) {
       if (issueData.suggestions.length > this.config.maxSuggestionsPerIssue) {
-        errors.push(`提案が多すぎます（最大${this.config.maxSuggestionsPerIssue}個）`);
+        warnings.push(`提案が多すぎます（最大${this.config.maxSuggestionsPerIssue}個）。最初の${this.config.maxSuggestionsPerIssue}個のみ使用します。`);
+        issueData.suggestions = issueData.suggestions.slice(0, this.config.maxSuggestionsPerIssue);
       }
 
       const validatedSuggestions: Suggestion[] = [];
@@ -198,13 +199,17 @@ export class SchemaValidator {
         if (suggestionResult.isValid && suggestionResult.sanitizedData) {
           validatedSuggestions.push(suggestionResult.sanitizedData);
         } else {
-          errors.push(...suggestionResult.errors.map(e => `Suggestion ${i}: ${e}`));
+          // エラーではなく警告として記録（このsuggestionをスキップするだけ）
+          warnings.push(...suggestionResult.errors.map(e => `Suggestion ${i}: ${e} (スキップしました)`));
         }
       }
 
-      // 検証された提案を設定
-      if (validatedSuggestions.length > 0) {
-        issueData.suggestions = validatedSuggestions;
+      // 検証された提案を設定（空でも問題なし）
+      issueData.suggestions = validatedSuggestions;
+
+      // 全提案が無効な場合は警告
+      if (validatedSuggestions.length === 0 && issueData.suggestions.length > 0) {
+        warnings.push('すべての提案が無効でした。Issue自体は保持されます。');
       }
     }
 

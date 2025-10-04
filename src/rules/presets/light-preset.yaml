@@ -26,7 +26,7 @@ rules:
   - id: "grammar.double_negation"
     severity: "warn"
     category: "grammar"
-    pattern: "(ない|ぬ|ん)([^。]{0,10}?)(ない|ぬ|ん)"
+    pattern: "(ない|ぬ)(こと|わけ|もの)?(は|も)(ない|ぬ)"
     message: "二重否定の表現です。意味が不明瞭になる可能性があります"
     autoFix: false
     enabled: true
@@ -93,7 +93,7 @@ rules:
   - id: "honorific.double_honorific"
     severity: "error"
     category: "honorific"
-    pattern: "(お伺いさせていただく|ご連絡申し上げます)"
+    pattern: "(お伺いさせていただく|おっしゃられる|お召し上がりになられる)"
     message: "二重敬語です。簡潔な表現に変更してください"
     autoFix: false
     enabled: true

@@ -1,16 +1,18 @@
 'use client';
 
-import React, { useMemo, memo } from 'react';
+import React, { useMemo, memo, useRef, useEffect } from 'react';
 import { useIssues, useSelectedIssue } from '@/lib/hooks';
 import { IssueSeverity, IssueCategory, IssueSource } from '@/types';
-import { 
-  getSeverityAccessibilityInfo, 
-  getCategoryAccessibilityInfo, 
+import {
+  getSeverityAccessibilityInfo,
+  getCategoryAccessibilityInfo,
   generateIssueDescription,
   generateIssueListDescription,
   getFocusIndicatorClasses,
   getAccessibleAnimationClasses
 } from '@/lib/accessibility-utils';
+import { SkeletonIssueList } from '@/components/ui/Skeleton';
+import { useAppStore } from '@/lib/store';
 
 /**
  * 問題リストコンポーネント
@@ -28,6 +30,18 @@ const IssueList = memo(function IssueList() {
   } = useIssues();
 
   const { selectIssue, issue: selectedIssue } = useSelectedIssue();
+  const { isAnalyzing } = useAppStore();
+  const selectedIssueRef = useRef<HTMLLIElement>(null);
+
+  // 選択されたissueへ自動スクロール
+  useEffect(() => {
+    if (selectedIssue && selectedIssueRef.current) {
+      selectedIssueRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest'
+      });
+    }
+  }, [selectedIssue]);
 
   // 重要度バッジコンポーネント
   const SeverityBadge = ({ severity }: { severity: IssueSeverity }) => {
@@ -231,7 +245,7 @@ const IssueList = memo(function IssueList() {
       </div>
 
       {/* 問題リスト */}
-      <div 
+      <div
         className="max-h-[400px] overflow-auto"
         role="region"
         aria-label="問題リスト"
@@ -240,7 +254,9 @@ const IssueList = memo(function IssueList() {
         <div id="issue-list-description" className="sr-only">
           {issueListDescription}
         </div>
-        {filteredIssues.length === 0 ? (
+        {isAnalyzing ? (
+          <SkeletonIssueList count={5} />
+        ) : filteredIssues.length === 0 ? (
           <div className="py-6 text-center text-sm text-slate-500">
             {stats.total === 0 ? '問題はありません。解析を実行してください。' : 'フィルターに一致する問題がありません。'}
           </div>
@@ -253,8 +269,11 @@ const IssueList = memo(function IssueList() {
               return (
                 <li
                   key={issue.id}
-                  className={`cursor-pointer px-2 py-3 hover:bg-slate-50 ${getAccessibleAnimationClasses()} ${
-                    isSelected ? 'bg-slate-50 border-l-4 border-blue-500' : ''
+                  ref={isSelected ? selectedIssueRef : null}
+                  className={`cursor-pointer px-2 py-3 transition-all duration-200 ${getAccessibleAnimationClasses()} ${
+                    isSelected
+                      ? 'bg-blue-50 border-l-4 border-blue-600 shadow-sm'
+                      : 'hover:bg-slate-50 border-l-4 border-transparent'
                   }`}
                   onClick={() => selectIssue(issue.id)}
                   tabIndex={0}

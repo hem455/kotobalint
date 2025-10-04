@@ -311,7 +311,7 @@ kotobalintのルールプリセットは textlint のオープンソースルー
 各ルールの `source` フィールドで元となったtextlintルールを記載しています。
 
 - textlint: MIT License
-- kotobalint: MIT License (予定)
+- kotobalint: MIT License
 
 ---
 

@@ -139,7 +139,7 @@ const defaultSettings: AppSettings = {
     trigger: 'manual',
     autoDelay: 500,
     maxSentenceLength: 10000,
-    mode: 'llm',
+    mode: 'rules', // デフォルトをrulesに変更（LLM設定が不完全な場合のエラーを回避）
     preset: 'standard'
   },
   rules: {

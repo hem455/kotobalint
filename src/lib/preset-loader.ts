@@ -1,5 +1,8 @@
-import fs from 'fs';
+import fs from 'fs/promises';
+import { readdirSync } from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 import yaml from 'js-yaml';
 import type { Rule } from '@/types';
 
@@ -27,6 +30,21 @@ export interface PresetConfig {
 }
 
 /**
+ * ファイル相対パスでデフォルトのpresetsディレクトリを取得
+ */
+function getDefaultPresetsDir(): string {
+  // ESM環境ではimport.meta.urlを使用、CJS環境では相対パスフォールバック
+  if (typeof import.meta !== 'undefined' && import.meta.url) {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    // src/lib から src/rules/presets へ
+    return path.join(__dirname, '..', 'rules', 'presets');
+  }
+  // フォールバック: process.cwd() からの相対パス
+  return path.join(process.cwd(), 'src', 'rules', 'presets');
+}
+
+/**
  * プリセットローダー
  * YAMLファイルからルールプリセットを読み込む
  */
@@ -34,8 +52,8 @@ export class PresetLoader {
   private presetsCache: Map<string, PresetConfig> = new Map();
   private presetsDir: string;
 
-  constructor(presetsDir: string = path.join(process.cwd(), 'src', 'rules', 'presets')) {
-    this.presetsDir = presetsDir;
+  constructor(presetsDir?: string) {
+    this.presetsDir = presetsDir || getDefaultPresetsDir();
   }
 
   /**
@@ -50,7 +68,7 @@ export class PresetLoader {
     const filePath = path.join(this.presetsDir, `${presetName}-preset.yaml`);
 
     try {
-      const fileContents = fs.readFileSync(filePath, 'utf8');
+      const fileContents = await fs.readFile(filePath, 'utf8');
       const data = yaml.load(fileContents) as PresetConfig;
 
       // バリデーション
@@ -81,16 +99,19 @@ export class PresetLoader {
    */
   async loadPresets(presetNames: Array<'light' | 'standard' | 'strict'>): Promise<Rule[]> {
     const allRules: Rule[] = [];
-    const ruleIds = new Set<string>();
+    const ruleMap = new Map<string, number>();
 
     for (const presetName of presetNames) {
       const config = await this.loadPreset(presetName);
 
       for (const rule of config.rules) {
-        // 重複を除外（後勝ち）
-        if (!ruleIds.has(rule.id)) {
+        // 後勝ち: 既存のルールがあれば置き換える
+        const existingIndex = ruleMap.get(rule.id);
+        if (existingIndex !== undefined) {
+          allRules[existingIndex] = rule;
+        } else {
+          ruleMap.set(rule.id, allRules.length);
           allRules.push(rule);
-          ruleIds.add(rule.id);
         }
       }
     }
@@ -103,7 +124,7 @@ export class PresetLoader {
    */
   async loadCustomPreset(filePath: string): Promise<PresetConfig> {
     try {
-      const fileContents = fs.readFileSync(filePath, 'utf8');
+      const fileContents = await fs.readFile(filePath, 'utf8');
       const data = yaml.load(fileContents) as PresetConfig;
 
       this.validatePresetConfig(data);
@@ -187,13 +208,13 @@ export class PresetLoader {
   }
 
   /**
-   * 利用可能なプリセット一覧を取得
+   * 利用可能なプリセット一覧を取得（同期的な列挙が必要なため readdirSync を使用）
    */
   getAvailablePresets(): Array<{ name: string; meta: PresetMetadata }> {
     const presets: Array<{ name: string; meta: PresetMetadata }> = [];
 
     try {
-      const files = fs.readdirSync(this.presetsDir);
+      const files = readdirSync(this.presetsDir);
 
       for (const file of files) {
         if (file.endsWith('-preset.yaml')) {
@@ -201,7 +222,8 @@ export class PresetLoader {
           const filePath = path.join(this.presetsDir, file);
 
           try {
-            const fileContents = fs.readFileSync(filePath, 'utf8');
+            // この同期読み込みは初期化時のみで、パフォーマンスへの影響は限定的
+            const fileContents = require('fs').readFileSync(filePath, 'utf8');
             const data = yaml.load(fileContents) as PresetConfig;
 
             if (data.meta) {

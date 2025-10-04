@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { RuleEngine } from '@/lib/rule-engine';
 import { defaultPresetLoader } from '@/lib/preset-loader';
-import type { ApiResponse } from '@/types';
+import type { ApiResponse, Issue, IssueCategory, IssueSeverity } from '@/types';
 
 export const runtime = "nodejs";
 
@@ -11,15 +11,15 @@ export const runtime = "nodejs";
 interface AnalyzeRequest {
   text: string;
   preset?: 'light' | 'standard' | 'strict';
-  enabledCategories?: string[];
-  enabledSeverities?: string[];
+  enabledCategories?: IssueCategory[];
+  enabledSeverities?: IssueSeverity[];
 }
 
 /**
  * レスポンスボディの型定義
  */
 interface AnalyzeResponse {
-  issues: any[];
+  issues: Issue[];
   meta: {
     elapsedMs: number;
     preset: string;
@@ -49,6 +49,18 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
       }, { status: 400 });
     }
 
+    // テキスト長の上限チェック（DoS対策）
+    const MAX_TEXT_LENGTH = 5000;
+    if (body.text.length > MAX_TEXT_LENGTH) {
+      return NextResponse.json({
+        success: false,
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'テキストが長すぎます'
+        }
+      }, { status: 413 });
+    }
+
     // プリセットの決定（デフォルトは standard）
     const preset = body.preset || 'standard';
 
@@ -74,7 +86,11 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
     rules.slice(0, 3).forEach(r => {
       console.log(`  - ${r.id}: pattern=${r.pattern instanceof RegExp ? 'RegExp' : typeof r.pattern}, enabled=${r.enabled}`);
     });
-    console.log('解析対象テキスト:', body.text);
+    
+    // 開発環境のみ、テキストの長さをログ出力（PII保護のため生テキストは出力しない）
+    if (process.env.NODE_ENV === 'development') {
+      console.log('解析対象テキスト長:', body.text.length, '文字');
+    }
 
     // テキスト解析の実行
     const result = await engine.analyzeText(body.text, {
@@ -86,16 +102,18 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
 
     console.log(`解析完了: ${result.issues.length}個の問題を検出`);
     
-    // デバッグ: 各 issue の詳細をログ出力
-    result.issues.forEach((issue, idx) => {
-      console.log(`Issue #${idx + 1}:`, {
-        id: issue.id,
-        range: issue.range,
-        message: issue.message,
-        matchedText: body.text.slice(issue.range.start, issue.range.end),
-        suggestions: issue.suggestions?.map(s => s.text)
+    // デバッグ: 開発環境のみ各 issue の詳細をログ出力（matchedTextは長さのみ表示してPII保護）
+    if (process.env.NODE_ENV === 'development') {
+      result.issues.forEach((issue, idx) => {
+        console.log(`Issue #${idx + 1}:`, {
+          id: issue.id,
+          range: issue.range,
+          message: issue.message,
+          matchedTextLength: issue.range.end - issue.range.start,
+          suggestions: issue.suggestions?.map(s => s.text)
+        });
       });
-    });
+    }
 
     // レスポンスの構築
     return NextResponse.json({
